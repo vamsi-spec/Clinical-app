@@ -1,0 +1,157 @@
+version: '3.9'
+
+services:
+  # ============================================
+  # POSTGRESQL DATABASE
+  # ============================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: clinical_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-clinical_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-clinical_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-clinical_db}
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-clinical_user} -d ${POSTGRES_DB:-clinical_db}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - clinical_network
+
+  # ============================================
+  # REDIS
+  # ============================================
+  redis:
+    image: redis:7-alpine
+    container_name: clinical_redis
+    restart: unless-stopped
+    command: redis-server --requirepass ${REDIS_PASSWORD:-redis_pass}
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', '-a', '${REDIS_PASSWORD:-redis_pass}', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - clinical_network
+
+  # ============================================
+  # OLLAMA — local LLM server
+  # ============================================
+  ollama:
+    image: ollama/ollama:latest
+    container_name: clinical_ollama
+    restart: unless-stopped
+    ports:
+      - '11434:11434'
+    volumes:
+      - ollama_models:/root/.ollama
+    # Uncomment below if you have NVIDIA GPU
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -f http://localhost:11434/api/tags || exit 1']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    networks:
+      - clinical_network
+
+  # ============================================
+  # BACKEND — Node.js + Express
+  # ============================================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: clinical_backend
+    restart: unless-stopped
+    ports:
+      - '5000:5000'
+    env_file:
+      - ./backend/.env
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - clinical_network
+
+  # ============================================
+  # ML SERVICE — Python FastAPI
+  # ============================================
+  ml-service:
+    build:
+      context: ./ml-service
+      dockerfile: Dockerfile
+    container_name: clinical_ml
+    restart: unless-stopped
+    ports:
+      - '8000:8000'
+    env_file:
+      - ./ml-service/.env
+    volumes:
+      - ./ml-service:/app
+      - ml_model_cache:/root/.cache
+    depends_on:
+      ollama:
+        condition: service_healthy
+    networks:
+      - clinical_network
+
+  # ============================================
+  # FRONTEND — React + Vite
+  # ============================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: clinical_frontend
+    restart: unless-stopped
+    ports:
+      - '3000:3000'
+    env_file:
+      - ./frontend/.env
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+    networks:
+      - clinical_network
+
+# ============================================
+# VOLUMES
+# ============================================
+volumes:
+  postgres_data:
+  redis_data:
+  ollama_models:
+  ml_model_cache:
+
+# ============================================
+# NETWORKS
+# ============================================
+networks:
+  clinical_network:
+    driver: bridge
