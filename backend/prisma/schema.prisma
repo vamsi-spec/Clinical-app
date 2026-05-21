@@ -1,0 +1,175 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+
+
+//Enums
+
+enum Role {
+  ADMIN
+  DOCTOR
+  NURSE
+  RECEPTIONIST
+}
+
+enum Severity{
+    LOW
+    MEDIUM
+    HIGH
+    CRITICAL
+}
+
+enum AppointmentStatus{
+    SCHEDULED
+    COMPLETED
+    CANCELLED
+    NO_SHOW
+}
+
+enum PipelineStatus {
+    PENDING
+    TRANSCRIBING
+    CORRECTING
+    DIARIZING
+    EXTRACTING_ENTITIES
+    GENERATING_SOAP
+    GENERATING_BILLING
+    COMPLETED
+    FAILED
+}
+
+model User {
+    id              String @id @default(uuid())
+    email           String @unique
+    passwordHash    String
+    firstName       String
+    lastName        String
+    role            Role
+    speciality      String? //only for doctors
+    assignedDoctorId String? //only for nurse role
+    isActive        Boolean @default(true) 
+    lastLoginAt     DateTime?
+    createdAt       DateTime @default(now())
+    updatedAt       DateTime @updatedAt
+
+
+    assignedDoctor User?     @relation("NurseDoctor", fields: [assignedDoctorId], references: [id])
+    nurses         User[]    @relation("NurseDoctor")
+
+    patients Patient[] 
+    visits   Visit[]
+    appointments Appointment[]
+    auditLogs  AuditLog[]
+
+
+    @@index([role])
+    @@index([email])
+
+}
+
+
+//Patient
+
+model Patient {
+  id            String @id @default(uuid())
+  doctorId      String
+  name          String
+  dob           DateTime
+  gender        String
+  bloodType     String?
+  allergies     String[]
+  currentMedications   String[]
+  phone         String?
+  email         String?
+  address       String?
+  emergencyContact String?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+
+  doctor        User       @relation(fields: [doctorId], references:[id])
+  visits        Visit       []
+  appointments    Appointment[]
+  trends          PatientTrend[]
+
+  @@index([doctorId])
+  @@index([name])
+}
+
+//Visit
+
+model Visit {
+  id     String
+  patientId String
+  doctorId   String
+  audioFileUrl    String?
+  audoPublicId    String?
+  duration    Int?
+  visitDate   DateTime  @default(now())
+  pipelineStatus  PipelineStatus  @default(PENDING)
+  pipelineError   String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  patient       Patient   @relation(fields: [patientId], references: [id])
+  doctor        User      @relation(fields: [doctorId], references: [id])
+
+  soapNote      SOAPNote?
+  nerResult     NERResult?
+  drugInteractions    DrugInteraction[]
+  billingCode         BillingCode?
+
+  @@index([patientId])
+  @@index([doctorId])
+  @@index([visitDate])
+  @@index([patientId, doctorId, visitDate])
+}
+
+
+//soapNote
+
+model SOAPNote {
+  id        String  @id @default(uuid())
+  visitId   String
+  subjective    String    @db.Text
+  objective     String?   @db.Text
+  assessment    String?   @db.Text
+  plan          String?   @db.Text
+  explainableNote   Json  @default("{}")
+  auditHash     String?   //SHA-256 for finalized one
+  versions      Json      @default("[]")
+  isFinalized   Boolean   @default(false)
+  finalizedAt   DateTime?
+  finalizedBy   String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+
+  visit Visit @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  @@index([visitId])
+
+}
+
+
+model NERResult {
+  id          String  @id @default(uuid())
+  visitId     String  @unique
+  medications Json    @default("[]")
+  symptoms    Json    @default("[]")
+  diagnoses   Json    @default("[]")
+  rawSegments Json    @default("[]")
+  createdAt   DateTime @default(now())
+
+  visit Visit @relation(fields: [visitId], references: [id], onDelete: Cascade)
+
+  @@index([visitId])
+}
+
+
