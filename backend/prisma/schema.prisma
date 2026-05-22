@@ -173,3 +173,96 @@ model NERResult {
 }
 
 
+model DrugInteraction {
+  id        String      @id @default(uuid())
+  visitId   String      
+  drug1     String
+  drug2     String
+  severity  Severity
+  description String  @db.Text
+  source    String    @default("rxnav")
+  createdAt DateTime  @default(now())
+
+  visit Visit @relation(fields: [visitId], references: [id], onDelete: Cascade)
+
+  @@index([visitId])
+}
+
+
+model BillingCode {
+  id          String    @id @default(uuid())
+  visitId     String    @unique
+  icd10Codes  Json      @default("[]")
+  cptCode     Json      @default("{}")
+  codingGaps  Json      @default("[]")
+  confirmedCodes   Json      @default("[]")
+  isConfirmed   Boolean   @default(false)
+  confirmedAt DateTime?
+  confirmedBy String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  visit Visit @relation(fields: [visitId], references: [id], onDelete: Cascade)
+
+  @@index([visitId])
+}
+
+model AuditLog {
+  id                  String     @id   @default(uuid())
+  userId              String?
+  actions             String
+  resourceType        String     //visit,patient,User which record affected
+  resourceId          String?
+  ipAddress           String
+  userAgent           String?
+  metadata            Json?
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([createdAt])
+  @@index([action])
+  @@index([resourceType])
+}
+
+
+
+model Appointment {
+  id            String    @default(uuid())
+  patientId     String
+  doctorId      String
+  scheduledAt DateTime
+  duration      Int @default(30)
+  status        AppointmentStatus   @default(SCHEDULED)
+  notes         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  patient Patient @relation(fields: [patientId], references: [id])
+  doctor User   @relation(fields: [doctorId], references: [id])
+
+  @@index([patientId])
+  @@index([doctorId])
+  @@index([scheduledAt])
+  @@index([doctorId, scheduledAt])
+}
+
+
+model PatientTrend {
+  id          String  @id @default(uuid())
+  patientId   String
+  metricType  String
+  value       Float
+  unit        String
+  recordedAt  DateTime
+  visitId     String?
+
+  notes       String?
+  createdAt   DateTime   @default(now())
+
+  patient Patient @relation(fields: [patientId], references: [id])
+
+  @@index([patientId])
+  @@index([patientId, metricType])
+  @@index([patientId, metricType, recordedAt])
+}
