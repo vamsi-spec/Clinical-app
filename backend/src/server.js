@@ -5,17 +5,19 @@ import helmet from 'helmet'
 import cors from 'cors'
 import cookieParser from 'cookie-parser'
 import morgan from 'morgan'
-import Server from 'socket.io'
+import { Server } from 'socket.io'
 
 import logger from './utils/logger.js'
-import connectDB from './config/db.js'
-import connectRedis from './config/redis.js'
-import errorResponse from './utils/apiResponse.js'
+import { connectDB } from './config/db.js'
+import { connectRedis } from './config/redis.js'
+import { errorResponse } from './utils/apiResponse.js'
 
 
 
 
 dotenv.config()
+
+const PORT = process.env.PORT || 5000
 
 export const app = express()
 export const httpServer = http.createServer(app)
@@ -94,7 +96,7 @@ const startServer = async () => {
         await connectDB()
         await connectRedis()
 
-        httpServer.listen(prototype, () => {
+        httpServer.listen(PORT, () => {
             logger.info(`Server running on port ${PORT} - ${process.env.NODE_ENV}`)
             logger.info(`Environment: ${process.env.NODE_ENV}`)
             logger.info(`Clinical Note Intelligence Platform ready`)

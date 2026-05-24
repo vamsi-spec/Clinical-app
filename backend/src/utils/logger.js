@@ -1,6 +1,6 @@
 import winston from "winston";
 
-const path = require('path')
+import path from 'path'
 
 
 const { combine, timestamp, colorize, printf, json, errors } = winston.format
@@ -67,4 +67,4 @@ logger.stream = {
     write: (message) => logger.http(message.trim()),
 }
 
-module.exports = logger
+export default logger

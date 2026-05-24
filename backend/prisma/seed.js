@@ -1,5 +1,5 @@
-const { PrismaClient } = require('@prisma/client')
-const bcrypt = require('bcryptjs')
+import { PrismaClient } from '@prisma/client'
+import bcrypt from 'bcryptjs'
 
 const prisma = new PrismaClient()
 
@@ -39,7 +39,7 @@ async function main() {
             firstName: 'Priya',
             lastName: 'Sharma',
             role: 'DOCTOR',
-            specialty: 'General Medicine',
+            speciality: 'General Medicine',
         },
     })
     console.log('✅ Doctor created:', doctor.email)

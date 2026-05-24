@@ -1,5 +1,6 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
@@ -106,7 +107,7 @@ model Patient {
 //Visit
 
 model Visit {
-  id     String
+  id     String @id @default(uuid())
   patientId String
   doctorId   String
   audioFileUrl    String?
@@ -137,7 +138,7 @@ model Visit {
 
 model SOAPNote {
   id        String  @id @default(uuid())
-  visitId   String
+  visitId   String  @unique
   subjective    String    @db.Text
   objective     String?   @db.Text
   assessment    String?   @db.Text
@@ -211,12 +212,13 @@ model BillingCode {
 model AuditLog {
   id                  String     @id   @default(uuid())
   userId              String?
-  actions             String
+  action              String
   resourceType        String     //visit,patient,User which record affected
   resourceId          String?
   ipAddress           String
   userAgent           String?
   metadata            Json?
+  createdAt           DateTime   @default(now())
   user User? @relation(fields: [userId], references: [id])
 
   @@index([userId])
@@ -228,7 +230,7 @@ model AuditLog {
 
 
 model Appointment {
-  id            String    @default(uuid())
+  id            String    @id @default(uuid())
   patientId     String
   doctorId      String
   scheduledAt DateTime

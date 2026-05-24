@@ -1,5 +1,3 @@
-version: '3.9'
-
 services:
   # ============================================
   # POSTGRESQL DATABASE
@@ -13,7 +11,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-clinical_pass}
       POSTGRES_DB: ${POSTGRES_DB:-clinical_db}
     ports:
-      - '5432:5432'
+      - '5439:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -34,7 +32,7 @@ services:
     restart: unless-stopped
     command: redis-server --requirepass ${REDIS_PASSWORD:-redis_pass}
     ports:
-      - '6379:6379'
+      - '6389:6379'
     volumes:
       - redis_data:/data
     healthcheck:
@@ -65,11 +63,11 @@ services:
     #           count: 1
     #           capabilities: [gpu]
     healthcheck:
-      test: ['CMD-SHELL', 'curl -f http://localhost:11434/api/tags || exit 1']
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 20s
+      test: ['CMD', 'ollama', 'list']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     networks:
       - clinical_network
 
@@ -86,6 +84,9 @@ services:
       - '5000:5000'
     env_file:
       - ./backend/.env
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-clinical_user}:${POSTGRES_PASSWORD:-clinical_pass}@postgres:5432/${POSTGRES_DB:-clinical_db}
+      - REDIS_URL=redis://redis:6379
     volumes:
       - ./backend:/app
       - /app/node_modules
