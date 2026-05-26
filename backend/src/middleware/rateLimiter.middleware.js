@@ -1,6 +1,6 @@
 import rateLimit from 'express-rate-limit'
-import { errorResponse } from '../utils/apiResponse'
-import logger from '../utils/logger'
+import { errorResponse } from '../utils/apiResponse.js'
+import logger from '../utils/logger.js'
 
 
 //Auth Rate limiter

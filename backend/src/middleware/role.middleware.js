@@ -1,5 +1,5 @@
-import { errorResponse } from "../utils/apiResponse";
-import logger from "../utils/logger";
+import { errorResponse } from "../utils/apiResponse.js";
+import logger from "../utils/logger.js";
 
 
 export const allowRoles = (...roles) => {

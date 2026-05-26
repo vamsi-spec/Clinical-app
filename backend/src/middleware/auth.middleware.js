@@ -1,7 +1,7 @@
 import jwt from 'jsonwebtoken'
-import prisma from '../config/db.config.js'
+import { prisma } from '../config/db.js'
 import { isTokenBlacklisted } from '../config/redis.js'
-import { errorResponse } from '../utils/apiResponse'
+import { errorResponse } from '../utils/apiResponse.js'
 import logger from '../utils/logger.js'
 
 export const protect = async (req,res,next) => {
@@ -35,7 +35,7 @@ export const protect = async (req,res,next) => {
                 firstName: true,
                 lastName: true,
                 role: true,
-                specialty: true,
+                speciality: true,
                 assignedDoctorId: true,
                 isActive: true 
             },
@@ -72,7 +72,7 @@ export const optionalAuth = async (req, res, next) => {
         firstName: true,
         lastName: true,
         role: true,
-        specialty: true,
+        speciality: true,
         assignedDoctorId: true,
         isActive: true,
       },

@@ -1,5 +1,5 @@
 import cloudinary from "cloudinary";
-import logger from "../utils/logger";
+import logger from "../utils/logger.js";
 
 
 cloudinary.config({

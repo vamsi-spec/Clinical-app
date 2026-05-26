@@ -1,5 +1,5 @@
-import { validationErrorResponse } from "../utils/apiResponse";
-import logger from "../utils/logger";
+import { validationErrorResponse } from "../utils/apiResponse.js";
+import logger from "../utils/logger.js";
 
 export const validate = (schema) =>{
     return (req,res,next) => {
