@@ -12,6 +12,8 @@ import { connectDB } from './config/db.js'
 import { connectRedis } from './config/redis.js'
 import { errorResponse } from './utils/apiResponse.js'
 
+import { ensureTempDir } from './middleware/upload.middleware.js'
+
 import authRouter from './routes/auth.routes.js'
 
 
@@ -100,6 +102,7 @@ const startServer = async () => {
     try {
         await connectDB()
         await connectRedis()
+        await ensureTempDir()
 
         httpServer.listen(PORT, () => {
             logger.info(`Server running on port ${PORT} - ${process.env.NODE_ENV}`)

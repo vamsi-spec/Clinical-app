@@ -19,6 +19,14 @@ enum Role {
   RECEPTIONIST
 }
 
+enum AppointmentType {
+  SCHEDULED
+  WALK_IN
+  FOLLOW_UP
+  REFERRAL
+  EMERGENCY
+}
+
 enum Severity{
     LOW
     MEDIUM
@@ -79,6 +87,7 @@ model User {
 
 model Patient {
   id            String @id @default(uuid())
+  mrn           String @unique
   doctorId      String
   name          String
   dob           DateTime
@@ -88,11 +97,36 @@ model Patient {
   currentMedications   String[]
   phone         String?
   email         String?
-  address       String?
+  address       String? @db.Text
+  city          String?
+  state         String?
+  pincode       String?
+
+
   emergencyContact String?
+  emergencyContactName  String?
+  emergencyContactPhone String?
+  emergencyContactRel   String?
+
+  primaryInsurance   String?
+  insuranceNumber    String?
+  secondaryInsurance String?
+
+  pastSurgeries      String[]
+  chronicConditions  String[]
+  familyHistory      String?   @db.Text
+
+  consentGiven       Boolean   @default(false)
+  consentDate        DateTime?
+
+  referredBy         String?   // doctorId who referred
+
   isActive      Boolean  @default(true)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+
+  deletedAt          DateTime?
+  deletedBy          String?
 
 
   doctor        User       @relation(fields: [doctorId], references:[id])
@@ -237,6 +271,16 @@ model Appointment {
   duration      Int @default(30)
   status        AppointmentStatus   @default(SCHEDULED)
   notes         String?
+  type          AppointmentType  @default(SCHEDULED)
+  chiefComplaint     String?   // why is patient coming
+  cancelReason       String?
+  cancelledBy        String? 
+  reminderSent       Boolean   @default(false)
+  isWalkIn           Boolean   @default(false)
+  followUpOf         String?   // appointmentId — if this is a follow-up visit
+  bufferMinutes      Int       @default(10)
+
+
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
