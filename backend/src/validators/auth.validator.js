@@ -1,21 +1,15 @@
 import { z } from "zod";
 
-// ============================================
-// PASSWORD RULES
-// Reused across register and change password
-// ============================================
+
 export const passwordSchema = z
   .string()
   .min(8, 'Password must be at least 8 characters')
-  .max(72, 'Password cannot exceed 72 characters') // bcrypt max is 72 bytes
+  .max(72, 'Password cannot exceed 72 characters') 
   .regex(/[A-Z]/, 'Password must contain at least one uppercase letter')
   .regex(/[a-z]/, 'Password must contain at least one lowercase letter')
   .regex(/[0-9]/, 'Password must contain at least one number')
   .regex(/[^A-Za-z0-9]/, 'Password must contain at least one special character');
 
-// ============================================
-// REGISTER SCHEMA
-// ============================================
 export const registerSchema = z.object({
   email: z
     .string()
@@ -45,8 +39,7 @@ export const registerSchema = z.object({
     }),
   }),
 
-  // Optional fields — only relevant for specific roles
-  // Note: Using 'speciality' to match schema.prisma and database structure
+
   speciality: z
     .string()
     .max(100, 'Speciality cannot exceed 100 characters')
@@ -65,7 +58,6 @@ export const registerSchema = z.object({
   }
 ).refine(
   (data) => {
-    // DOCTOR must have speciality
     if (data.role === 'DOCTOR' && !data.speciality) return false
     return true
   },
@@ -85,9 +77,6 @@ export const registerSchema = z.object({
   }
 );
 
-// ============================================
-// LOGIN SCHEMA
-// ============================================
 export const loginSchema = z.object({
   email: z
     .string()
@@ -100,17 +89,11 @@ export const loginSchema = z.object({
     .min(1, 'Password is required'),
 });
 
-// ============================================
-// REFRESH TOKEN SCHEMA
-// Token comes from cookie — but validate body if sent
-// ============================================
+
 export const refreshSchema = z.object({
   refreshToken: z.string().optional(),
 });
 
-// ============================================
-// CHANGE PASSWORD SCHEMA
-// ============================================
 export const changePasswordSchema = z.object({
   currentPassword: z
     .string()

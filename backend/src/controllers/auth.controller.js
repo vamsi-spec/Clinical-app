@@ -1,65 +1,52 @@
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import prisma from "../config/prisma.js";
+import {prisma} from "../config/db.js";
+import { redis,blacklistToken,isTokenBlacklisted } from "../config/redis.js";
+import { successResponse,errorResponse } from "../utils/apiResponse.js";
+import logger from "../utils/logger.js";
 
-const generateAccessToken = (user) => {
+const ACCESS_COOKIE_OPTIONS = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === 'production',
+  sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+  maxAge: 15 * 60 * 1000,
+}
+
+const REFRESH_COOKIE_OPTIONS = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === 'production',
+  sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+  maxAge: 7 * 24 * 60 * 60 * 1000,
+  path: '/api/auth/refresh',
+}
+
+const generateAccessToken = (userId,role) => {
     return jwt.sign(
-        {
-            id: user.id,
-            email: user.email,
-            role: user.role,
-        },
+        {userId,role},
         process.env.JWT_ACCESS_SECRET,
-        { expiresIn: "15m" }
-    );
-};
+        {expiresIn: process.env.JWT_ACCESS_EXPIRES_IN || "15m"}
+    )
+}
 
-const generateRefreshToken = (user) => {
+const generateRefreshToken = (userId) => {
     return jwt.sign(
-        {
-            id: user.id,
-        },
+        {userId},
         process.env.JWT_REFRESH_SECRET,
-        { expiresIn: "7d" }
+        { expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || "7d" }
     );
 };
 
-const cookieOptions = {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "strict",
-};
 
-const setAuthCookies = (res, accessToken, refreshToken) => {
-    res.cookie("accessToken", accessToken, {
-        ...cookieOptions,
-        maxAge: 15 * 60 * 1000,
-    });
+const sanitizeUser = (user) => {
+    const {passwordHash, ...safeUser} = user
+    return safeUser
+}
 
-    res.cookie("refreshToken", refreshToken, {
-        ...cookieOptions,
-        maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
-};
+//Register
+//POST /api/auth/register
 
-const clearAuthCookies = (res) => {
-    res.clearCookie("accessToken", cookieOptions);
-    res.clearCookie("refreshToken", cookieOptions);
-};
 
-const safeUserSelect = {
-    id: true,
-    email: true,
-    firstName: true,
-    lastName: true,
-    role: true,
-    specialty: true,
-    assignedDoctorId: true,
-    isActive: true,
-    createdAt: true,
-};
-
-const register = async (req, res) => {
+export const register = async (req, res) => {
     try {
         const {
             email,
@@ -76,12 +63,26 @@ const register = async (req, res) => {
         });
 
         if (existingUser) {
-            return res.status(409).json({
-                success: false,
-                message: "User already exists with this email",
-            });
+            return errorResponse(res,'Email already registered',409)
         }
 
+        if(role === 'NURSE' && assignedDoctorId) {
+            const doctor = await prisma.user.findUnique({
+                where: {id: assignedDoctorId},
+                select: {id: true,role: true,isActive: true},
+            })
+
+            if(!doctor){
+                return errorResponse(res,'Assigned doctor not fount.',404)
+            }
+
+            if(doctor.role !== 'DOCTOR'){
+                return errorResponse(res,'assignedDoctorId must belong to a Doctor.',400)
+            }
+            if(!doctor.isActive) {
+                return errorResponse(res,'Assigned doctor account is inactive.',400)
+            }
+        }
         const passwordHash = await bcrypt.hash(password, 12);
 
         const user = await prisma.user.create({
@@ -94,26 +95,27 @@ const register = async (req, res) => {
                 specialty: role === "DOCTOR" ? specialty : null,
                 assignedDoctorId: role === "NURSE" ? assignedDoctorId : null,
             },
-            select: safeUserSelect,
         });
 
-        return res.status(201).json({
-            success: true,
-            message: "User registered successfully",
-            user,
-        });
-    }
-    catch (error) {
-        console.error("Register Error:", error);
+        logger.info(`New user registered: ${user.email} (${user.role})`)
 
-        return res.status(500).json({
-            success: false,
-            message: "Internal server error",
-        });
-    }
-};
+    return successResponse(
+      res,
+      sanitizeUser(user),
+      'Registration successful.',
+      201
+    )
+  } catch (error) {
+    logger.error('Register error:', error)
+    return errorResponse(res, 'Registration failed.', 500, error)
+  }
+}
 
-const login = async (req, res) => {
+
+//Login 
+//POST /api/auth/login
+
+export const login = async (req, res) => {
     try {
         const { email, password } = req.body;
 
@@ -122,78 +124,194 @@ const login = async (req, res) => {
         });
 
         if (!user) {
-            return res.status(401).json({
-                success: false,
-                message: "Invalid email or password",
-            });
+            return errorResponse(res, 'Invalid email or password.', 401)
         }
 
         if (!user.isActive) {
-            return res.status(403).json({
-                success: false,
-                message: "Account is inactive",
-            });
+            return errorResponse(
+                res,
+                'Account has been deactivated. Contact your administrator.',
+                403
+            )
         }
 
         const isPasswordMatched = await bcrypt.compare(password, user.passwordHash);
 
         if (!isPasswordMatched) {
-            return res.status(401).json({
-                success: false,
-                message: "Invalid email or password",
-            });
+            logger.warn(`Failed login attempt for: ${email}`)
+            return errorResponse(res, 'Invalid email or password.', 401)
         }
 
         const accessToken = generateAccessToken(user);
         const refreshToken = generateRefreshToken(user);
 
-        setAuthCookies(res, accessToken, refreshToken);
+        // store refresh token in redis
 
-        return res.status(200).json({
-            success: true,
-            message: "Login successful",
-            user: {
-                id: user.id,
-                email: user.email,
-                firstName: user.firstName,
-                lastName: user.lastName,
-                role: user.role,
-                specialty: user.specialty,
-                assignedDoctorId: user.assignedDoctorId,
-                isActive: user.isActive,
+        await redis.setex(
+            `refresh:${refreshToken}`,
+            7*24*60*60, //7 days
+            user.id
+        )
+
+        await prisma.user.update({
+            where: {id: user.id},
+            data: {lastLoginAt: new Date()}
+        })
+
+        res.cookie('accessToken',accessToken,ACCESS_COOKIE_OPTIONS)
+        res.cookie('refreshToken',refreshToken,REFRESH_COOKIE_OPTIONS)
+
+        return successResponse(
+            res,
+            {
+                user: sanitizeUser(user),
+                accessToken,
             },
-        });
+            'Login successful'
+        )
+
+
     }
     catch (error) {
-        console.error("Login Error:", error);
-
-        return res.status(500).json({
-            success: false,
-            message: "Internal server error",
-        });
+        logger.error('Login error:', error)
+    return errorResponse(res, 'Login failed.', 500, error)
     }
 };
 
-const logout = async (req, res) => {
+//Refresh token
+//POST /api/auth/refresh
+
+export const refresh = async (req,res) => {
     try {
-        clearAuthCookies(res);
+        const refreshToken = req.cookies?.refreshToken
 
-        return res.status(200).json({
-            success: true,
-            message: "Logout successful",
-        });
+        if(!refreshToken){
+            return errorResponse(res,'No refresh token provided.',401)
+        }
+        const blacklisted = await isTokenBlacklisted(refreshToken)
+
+        if(blacklisted){
+            return errorResponse(res,'Refresh token is INVALID. Please login again',401)
+        }
+
+        let decoded 
+        try {
+      decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET)
+    } catch (jwtError) {
+      if (jwtError.name === 'TokenExpiredError') {
+        return errorResponse(res, 'Refresh token expired. Please log in again.', 401)
+      }
+      return errorResponse(res, 'Invalid refresh token.', 401)
+    }
+
+    const storedUserId = await redis.get(`refresh:${refreshToken}`)
+
+    if (!storedUserId || storedUserId !== decoded.userId) {
+      return errorResponse(res, 'Refresh token not recognized. Please log in again.', 401)
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: decoded.userId },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        role: true,
+        specialty: true,
+        assignedDoctorId: true,
+        isActive: true,
+      },
+    })
+
+    if (!user || !user.isActive) {
+      return errorResponse(res, 'User not found or deactivated.', 401)
+    }
+
+    //Issue new access token
+    const newAccessToken = generateAccessToken(user.id,user.role)
+
+    const newRefreshToken = generateRefreshToken(user.id)
+
+    await redis.del(`refresh:${refreshToken}`)
+
+    await redis.setex(
+        `refresh:${newRefreshToken}`,
+        7*24*60*60,
+        user.id
+    )
+
+    res.cookie('accessToken', newAccessToken, ACCESS_COOKIE_OPTIONS)
+    res.cookie('refreshToken', newRefreshToken, REFRESH_COOKIE_OPTIONS)
+
+    return successResponse(
+      res,
+      { accessToken: newAccessToken, user },
+      'Token refreshed successfully.'
+    )
+
+        
+    } catch (error) {
+        logger.error('Refresh token error:', error)
+    return errorResponse(res, 'Token refresh failed.', 500, error)
+    }
+}
+
+
+//LOGOUT
+//POST /api/auth/logout
+
+
+
+export const logout = async (req, res) => {
+    try {
+       const accessToken = req.cookies?.accessToken
+       const refreshToken = req.cookies?.refreshToken
+
+       if(accessToken){
+        try {
+            const decoded = jwt.decode(accessToken)
+            if(decoded?.exp) {
+                const expirySeconds = decoded.exp - Math.floor(Date.now() / 1000)
+                if(expirySeconds > 0)
+                await blacklistToken(accessToken,expirySeconds)
+            }
+        } catch (error) {
+            logger.warn('Failed to blacklist token',error.message)
+        }
+       }
+
+       if(refreshToken){
+        try {
+            await redis.del(`refresh:${refreshToken}`)
+        } catch (error) {
+            logger.warn('Failed to remove refresh token',error.message)
+        }
+       }
+
+    res.clearCookie('accessToken', {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+    })
+    res.clearCookie('refreshToken', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+      path: '/api/auth/refresh',
+    })
+
+    logger.info(`User logged out: ${req.user?.email}`)
+
+    return successResponse(res, null, 'Logged out successfully.')
     }
     catch (error) {
-        console.error("Logout Error:", error);
-
-        return res.status(500).json({
-            success: false,
-            message: "Internal server error",
-        });
+        logger.error('Logout error:', error)
+    return errorResponse(res, 'Logout failed.', 500, error)
     }
 };
 
-const changePassword = async (req, res) => {
+export const changePassword = async (req, res) => {
     try {
         const { currentPassword, newPassword } = req.body;
         const userId = req.user.id;
@@ -202,14 +320,7 @@ const changePassword = async (req, res) => {
             where: { id: userId },
         });
 
-        if (!user) {
-            clearAuthCookies(res);
-
-            return res.status(404).json({
-                success: false,
-                message: "User not found",
-            });
-        }
+        
 
         const isPasswordMatched = await bcrypt.compare(
             currentPassword,
@@ -217,10 +328,7 @@ const changePassword = async (req, res) => {
         );
 
         if (!isPasswordMatched) {
-            return res.status(400).json({
-                success: false,
-                message: "Current password is incorrect",
-            });
+            return errorResponse(res, 'Current password is incorrect', 401)
         }
 
         const newPasswordHash = await bcrypt.hash(newPassword, 12);
@@ -232,38 +340,80 @@ const changePassword = async (req, res) => {
             },
         });
 
-        clearAuthCookies(res);
+        const accessToken = req.cookies?.accessToken
+        const refreshToken = req.cookies?.refreshToken
 
-        return res.status(200).json({
-            success: true,
-            message: "Password changed successfully. Please login again.",
-        });
+        if (accessToken) {
+      const decoded = jwt.decode(accessToken)
+      if (decoded?.exp) {
+        const expirySeconds = decoded.exp - Math.floor(Date.now() / 1000)
+        if (expirySeconds > 0) await blacklistToken(accessToken, expirySeconds)
+      }
+    }
+
+    if (refreshToken) {
+      await redis.del(`refresh:${refreshToken}`)
+    }
+    res.clearCookie('accessToken', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+    })
+    res.clearCookie('refreshToken', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+      path: '/api/auth/refresh',
+    })
+
+    logger.info(`Password changed for user: ${user.email}`)
+
+    return successResponse(
+      res,
+      null,
+      'Password changed successfully. please login again.')
     }
     catch (error) {
-        console.error("Change Password Error:", error);
-
-        return res.status(500).json({
-            success: false,
-            message: "Internal server error",
-        });
+        logger.error('Change password error:', error)
+        return errorResponse(res, 'Failed to change password.', 500, error)
     }
 };
 
-const me = async (req, res) => {
+export const getMe = async (req, res) => {
     try {
-        return res.status(200).json({
-            success: true,
-            user: req.user,
-        });
-    }
-    catch (error) {
-        console.error("Me Error:", error);
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        role: true,
+        specialty: true,
+        assignedDoctorId: true,
+        isActive: true,
+        lastLoginAt: true,
+        createdAt: true,
+        // If nurse — include assigned doctor info
+        assignedDoctor: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            specialty: true,
+          },
+        },
+      },
+    })
 
-        return res.status(500).json({
-            success: false,
-            message: "Internal server error",
-        });
+    if (!user) {
+      return errorResponse(res, 'User not found.', 404)
     }
-};
 
-export { register, login, logout, changePassword, me };
+    return successResponse(res, user, 'User profile retrieved.')
+  } catch (error) {
+    logger.error('Get me error:', error)
+    return errorResponse(res, 'Failed to retrieve profile.', 500, error)
+  }
+}
+
