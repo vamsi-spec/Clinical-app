@@ -12,6 +12,8 @@ import { connectDB } from './config/db.js'
 import { connectRedis } from './config/redis.js'
 import { errorResponse } from './utils/apiResponse.js'
 
+import authRouter from './routes/auth.routes.js'
+
 
 
 
@@ -79,6 +81,9 @@ io.on('connection', (socket) => {
 app.use((req, res) => {
     errorResponse(res, `Route ${req.method} ${req.originalUrl} not found`, 404)
 })
+
+//Routes
+app.use('/api/auth',authRouter)
 
 
 app.use((err, req, res, _next) => {

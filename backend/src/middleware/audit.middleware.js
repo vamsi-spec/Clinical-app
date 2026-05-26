@@ -53,7 +53,7 @@ export const extractResourceInfo = (req) => {
   // segments[0] = 'api', segments[1] = resource name
   const rawResource = segments[1] || 'unknown'
 
-  // Resource type map — explicit is better than clever string manipulation
+  
   const resourceTypeMap = {
     patients: 'Patient',
     visits: 'Visit',
@@ -78,7 +78,7 @@ export const extractResourceInfo = (req) => {
 //why -> so it never blocks or slow down the response
 //Usage: app.use(auditLog) -apply globally after auth
 
-const auditLog = (req,res,next) => {
+export const auditLog = (req,res,next) => {
     res.on('finish',async () => {
         try {
             if(
@@ -104,7 +104,6 @@ const auditLog = (req,res,next) => {
         delete safeBody.confirmPassword
         delete safeBody.token
         delete safeBody.refreshToken
-        // Only log if body is small enough
         if (JSON.stringify(safeBody).length < 1000) {
           metadata.body = safeBody
         }
