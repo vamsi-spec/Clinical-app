@@ -39,13 +39,13 @@ const doctorAndAdmin = allowRoles('ADMIN', 'DOCTOR')
 const allRoles = allowRoles('ADMIN', 'DOCTOR', 'NURSE', 'RECEPTIONIST')
 
 
-export const selfOrAdmin = (params = 'id') => {
+export const selfOrAdmin = (paramName = 'id') => {
     return (req,res,next) => {
         if(!req.user){
             return errorResponse(res, 'Authentication required.', 401)
         }
-        const isAdmin = req.user.role === 'ADMIM'
-        const isSelf = req.params[paramName] = req.user.id
+        const isAdmin = req.user.role === 'ADMIN'
+        const isSelf = req.params[paramName] === req.user.id
         if(!isAdmin && !isSelf){
             logger.warn('Unauthorized self/admin access attempt', {
         userId: req.user.id,

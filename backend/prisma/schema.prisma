@@ -27,6 +27,14 @@ enum AppointmentType {
   EMERGENCY
 }
 
+enum TransferRequestStatus {
+  PENDING    // doctor raised request — waiting for admin
+  APPROVED   // admin approved — waiting for receptionist to execute
+  REJECTED   // admin rejected — doctor notified
+  COMPLETED  // receptionist executed — patient moved
+  CANCELLED  // doctor cancelled their own request
+}
+
 enum Severity{
     LOW
     MEDIUM
@@ -70,6 +78,8 @@ model User {
 
     assignedDoctor User?     @relation("NurseDoctor", fields: [assignedDoctorId], references: [id])
     nurses         User[]    @relation("NurseDoctor")
+    transferRequestsRaised    TransferRequest[] @relation("TransferFrom")
+    transferRequestsReceiving TransferRequest[] @relation("TransferTo")
 
     patients Patient[] 
     visits   Visit[]
@@ -86,58 +96,121 @@ model User {
 //Patient
 
 model Patient {
-  id            String @id @default(uuid())
-  mrn           String @unique
-  doctorId      String
-  name          String
-  dob           DateTime
-  gender        String
-  bloodType     String?
-  allergies     String[]
-  currentMedications   String[]
-  phone         String?
-  email         String?
-  address       String? @db.Text
-  city          String?
-  state         String?
-  pincode       String?
+  id                    String    @id @default(uuid())
+  mrn                   String    @unique
 
+  // doctorId = the primary treating doctor
+  // Set when receptionist registers patient and assigns to doctor
+  doctorId              String
 
-  emergencyContact String?
+  // RECEPTIONIST-OWNED FIELDS
+  // Only receptionist and admin can update these
+  firstName             String
+  lastName              String
+  dob                   DateTime
+  gender                String
+  nationality           String?
+  preferredLanguage     String?   @default("English")
+
+  // Contact
+  phone                 String?
+  email                 String?
+  address               String?   @db.Text
+  city                  String?
+  state                 String?
+  pincode               String?
+
+  // Emergency contact
   emergencyContactName  String?
   emergencyContactPhone String?
   emergencyContactRel   String?
 
-  primaryInsurance   String?
-  insuranceNumber    String?
-  secondaryInsurance String?
+  // Insurance
+  primaryInsurance      String?
+  insuranceNumber       String?
+  secondaryInsurance    String?
 
-  pastSurgeries      String[]
-  chronicConditions  String[]
-  familyHistory      String?   @db.Text
+  // Consent — receptionist records this at registration
+  consentGiven          Boolean   @default(false)
+  consentDate           DateTime?
 
-  consentGiven       Boolean   @default(false)
-  consentDate        DateTime?
+  // DOCTOR-OWNED FIELDS
+  // Only doctor and admin can update these
+  bloodType             String?
+  allergies             String[]
+  currentMedications    String[]
+  pastSurgeries         String[]
+  chronicConditions     String[]
+  familyHistory         String?   @db.Text
 
-  referredBy         String?   // doctorId who referred
+  // Referral — doctor sets this
+  referredBy            String?   // doctorId who referred
 
-  isActive      Boolean  @default(true)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  // ADMIN-ONLY FIELDS
+  isActive              Boolean   @default(true)
+  deletedAt             DateTime?
+  deletedBy             String?
+  deleteReason          String?
 
-  deletedAt          DateTime?
-  deletedBy          String?
+  // Registration metadata
+  registeredBy          String?   // receptionistId who registered
 
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 
-  doctor        User       @relation(fields: [doctorId], references:[id])
-  visits        Visit       []
-  appointments    Appointment[]
-  trends          PatientTrend[]
+  // Relations
+  doctor                User             @relation("PatientDoctor", fields: [doctorId], references: [id])
+  visits                Visit[]
+  appointments          Appointment[]
+  trends                PatientTrend[]
+  transferRequests      TransferRequest[]
 
   @@index([doctorId])
-  @@index([name])
+  @@index([mrn])
+  @@index([firstName, lastName])
+  @@index([isActive])
+  @@index([doctorId, isActive])
 }
 
+// TRANSFER REQUEST
+// Doctor raises → Admin approves → Receptionist executes
+model TransferRequest {
+  id            String                @id @default(uuid())
+  patientId     String
+  fromDoctorId  String
+  toDoctorId    String
+  requestedBy   String                // doctorId who raised request
+  reason        String                @db.Text
+  status        TransferRequestStatus @default(PENDING)
+
+  // Admin review
+  adminNote     String?               @db.Text
+  reviewedBy    String?               // adminId
+  reviewedAt    DateTime?
+
+  // Receptionist execution
+  executedBy    String?               // receptionistId
+  executedAt    DateTime?
+
+  // Doctor cancellation
+  cancelledBy   String?
+  cancelledAt   DateTime?
+  cancelNote    String?
+
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+
+  // Relations
+  patient       Patient               @relation(fields: [patientId], references: [id])
+  fromDoctor    User                  @relation("TransferFrom", fields: [fromDoctorId], references: [id])
+  toDoctor      User                  @relation("TransferTo", fields: [toDoctorId], references: [id])
+
+  @@index([patientId])
+  @@index([status])
+  @@index([fromDoctorId])
+  @@index([toDoctorId])
+  @@index([requestedBy])
+}
 //Visit
 
 model Visit {
@@ -264,33 +337,56 @@ model AuditLog {
 
 
 model Appointment {
-  id            String    @id @default(uuid())
-  patientId     String
-  doctorId      String
-  scheduledAt DateTime
-  duration      Int @default(30)
-  status        AppointmentStatus   @default(SCHEDULED)
-  notes         String?
-  type          AppointmentType  @default(SCHEDULED)
-  chiefComplaint     String?   // why is patient coming
-  cancelReason       String?
-  cancelledBy        String? 
-  reminderSent       Boolean   @default(false)
-  isWalkIn           Boolean   @default(false)
-  followUpOf         String?   // appointmentId — if this is a follow-up visit
-  bufferMinutes      Int       @default(10)
+  id              String            @id @default(uuid())
+  patientId       String
+  doctorId        String
+  scheduledAt     DateTime
+  endsAt          DateTime
+  duration        Int               @default(30)
+  bufferMinutes   Int               @default(10)
+  status          AppointmentStatus @default(SCHEDULED)
+  type            AppointmentType   @default(SCHEDULED)
 
+  // Set by receptionist at booking
+  chiefComplaint  String?
+  notes           String?           @db.Text
+  isWalkIn        Boolean           @default(false)
 
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  // Follow-up tracking
+  followUpOf      String?
 
-  patient Patient @relation(fields: [patientId], references: [id])
-  doctor User   @relation(fields: [doctorId], references: [id])
+  // Cancellation — receptionist or doctor can cancel
+  cancelReason    String?
+  cancelledBy     String?
+  cancelledAt     DateTime?
 
-  @@index([patientId])
+  // No-show — receptionist marks this
+  noShowAt        DateTime?
+
+  // Completion — doctor marks this
+  completedAt     DateTime?
+  completedBy     String?
+
+  // Reminder
+  reminderSent    Boolean           @default(false)
+  reminderSentAt  DateTime?
+
+  // Who booked — receptionist or doctor
+  bookedBy        String?
+
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  // Relations
+  patient         Patient           @relation(fields: [patientId], references: [id])
+  doctor          User              @relation(fields: [doctorId], references: [id])
+
   @@index([doctorId])
+  @@index([patientId])
   @@index([scheduledAt])
   @@index([doctorId, scheduledAt])
+  @@index([status])
+  @@index([doctorId, status, scheduledAt])
 }
 
 

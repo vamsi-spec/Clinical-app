@@ -3,6 +3,7 @@
 
 import multer from 'multer'
 import path from 'path'
+import fs from 'fs/promises'
 import logger from '../utils/logger.js'
 import { errorResponse } from '../utils/apiResponse.js'
 
@@ -37,7 +38,7 @@ const storage = multer.diskStorage({
     filename: (_req,file,cb) => {
         const uniqueSuffix = `${Date.now()}-${Math.round(Math.random()*1e9)}`
 
-        const ext = Path.extname(file.originalname).toLowerCase()
+        const ext = path.extname(file.originalname).toLowerCase()
         cb(null,`audio-${uniqueSuffix}${ext}`)
     }
 })
@@ -113,7 +114,6 @@ export const uploadAudio = (req,res,next) => {
 
 
 export const cleanupTempFile = async (filePath) => {
-    const fs = require('fs').promises
     try {
         await fs.unlink(filePath)
         logger.info(`Temp file deleted: ${filePath}`)
@@ -124,7 +124,6 @@ export const cleanupTempFile = async (filePath) => {
 
 
 export const ensureTempDir = async () => {
-  const fs = require('fs').promises
   try {
     await fs.mkdir('temp', { recursive: true })
     logger.info('✅ Temp directory ready')

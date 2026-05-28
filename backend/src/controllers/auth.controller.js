@@ -54,7 +54,7 @@ export const register = async (req, res) => {
             firstName,
             lastName,
             role,
-            specialty,
+            speciality,
             assignedDoctorId,
         } = req.body;
 
@@ -92,7 +92,7 @@ export const register = async (req, res) => {
                 firstName,
                 lastName,
                 role,
-                specialty: role === "DOCTOR" ? specialty : null,
+                speciality: role === "DOCTOR" ? speciality : null,
                 assignedDoctorId: role === "NURSE" ? assignedDoctorId : null,
             },
         });
@@ -142,8 +142,8 @@ export const login = async (req, res) => {
             return errorResponse(res, 'Invalid email or password.', 401)
         }
 
-        const accessToken = generateAccessToken(user);
-        const refreshToken = generateRefreshToken(user);
+        const accessToken = generateAccessToken(user.id, user.role);
+        const refreshToken = generateRefreshToken(user.id);
 
         // store refresh token in redis
 
@@ -218,7 +218,7 @@ export const refresh = async (req,res) => {
         firstName: true,
         lastName: true,
         role: true,
-        specialty: true,
+        speciality: true,
         assignedDoctorId: true,
         isActive: true,
       },
@@ -389,7 +389,7 @@ export const getMe = async (req, res) => {
         firstName: true,
         lastName: true,
         role: true,
-        specialty: true,
+        speciality: true,
         assignedDoctorId: true,
         isActive: true,
         lastLoginAt: true,
@@ -400,7 +400,7 @@ export const getMe = async (req, res) => {
             id: true,
             firstName: true,
             lastName: true,
-            specialty: true,
+            speciality: true,
           },
         },
       },

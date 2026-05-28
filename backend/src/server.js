@@ -80,12 +80,12 @@ io.on('connection', (socket) => {
     })
 })
 
+//Routes
+app.use('/api/auth',authRouter)
+
 app.use((req, res) => {
     errorResponse(res, `Route ${req.method} ${req.originalUrl} not found`, 404)
 })
-
-//Routes
-app.use('/api/auth',authRouter)
 
 
 app.use((err, req, res, _next) => {
