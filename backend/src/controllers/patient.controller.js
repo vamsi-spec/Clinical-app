@@ -592,3 +592,314 @@ export const updateClinicalProfile = async (req,res) => {
     return errorResponse(res, 'Failed to update clinical profile.', 500, error)
     }
 }
+
+//Archive Patient
+//Delete /api/patients/:id
+//Admin only
+//soft delete
+
+export const archivePatient = async (req,res) => {
+    try {
+        const {id} = req.params
+        const {deleteReason} = req.body
+
+        const patient = await prisma.patient.findFirst({
+            where: {id,deletedAt: null},
+            select: {
+                id: true,
+                mrn: true,
+                firstName: true,
+                lastName: true,
+                _count: {select: {visits: true}},
+            },
+        })
+        if(!patient) {
+            return errorResponse(res,'Patient not found or already archived.',404)
+        }
+        await prisma.$transaction([
+            prisma.patient.update({
+                where: {id},
+                data: {
+                    isActive: false,
+                    deletedAt: new Date(),
+                    deletedBy: req.user.id,
+                    deleteReason,
+                }
+            }),
+            prisma.appointment.updateMany({
+                where: {
+                    patientId: id,
+                    sheduledAt: {gte: new Date()},
+                    status: 'SCHEDULED',
+                },
+                data: {
+                    status: 'CANCELLED',
+                    cancelReason: `Patient archived by admin on ${new Date().toISOString()} Reason: ${deleteReason}`,
+                    cancelledAt: new Date(),
+                    cancelledBy: req.user.id,
+                }
+            }),
+
+            prisma.transferRequest.updateMany({
+        where: {
+          patientId: id,
+          status: { in: ['PENDING', 'APPROVED'] },
+        },
+        data: {
+          status: 'CANCELLED',
+          cancelledBy: req.user.id,
+          cancelledAt: new Date(),
+          cancelNote: 'Patient archived',
+        },
+      }),
+        ])
+
+        logger.info(
+      `Patient archived: ${patient.mrn} (${patient.firstName} ${patient.lastName}) by admin ${req.user.email}. Reason: ${deleteReason}`
+    )
+
+    return successResponse(
+      res,
+      null,
+      `Patient ${patient.mrn} archived. All upcoming appointments and transfer requests cancelled.`
+    )
+    } catch (error) {
+         logger.error('Archive patient error:', error)
+    return errorResponse(res, 'Failed to archive patient.', 500, error)
+    }
+}
+
+//PUT api/patients/:id/restore
+//Admin only
+
+export const restorePatient = async (req,res) => {
+    try {
+        const {id} = req.params
+        const patient = await prisma.patient.findUnique({
+            where: {id},
+            select: {
+                id: true,
+                mrn: true,
+                firstName: true,
+                lastName: true,
+                deletedAt: true,
+                isActive: true,
+            }
+        })
+
+        if(!patient) {
+            return errorResponse(res,'Patient not found.',404)
+        }
+        if(!patient.deletedAt && patient.isActive) {
+            return errorResponse(res,'Patient is already active and not archived',400)
+        }
+
+        await prisma.patient.update({
+            where: {id},
+            data: {
+                isActive: true,
+                deletedAt: null,
+                deletedBy: null,
+                deleteReason: null
+            }
+        })
+
+        logger.info(
+      `Patient restored: ${patient.mrn} by admin ${req.user.email}`
+    )
+
+    return successResponse(
+      res,
+      null,
+      `Patient ${patient.mrn} (${patient.firstName} ${patient.lastName}) has been restored successfully.`
+    )
+
+    } catch (error) {
+        logger.error('Restore patient error:', error)
+    return errorResponse(res, 'Failed to restore patient.', 500, error)
+    }
+}
+
+
+//Get patient visits
+//GET /api/patients/:id/visits
+//Doctor(own patients) + admin + staff + nurses
+// Receptionist cannot see clinical visits
+
+export const getPatientVisits = async (req,res) => {
+    try {
+        const {id} = req.params
+        const scopeFilter = buildScopeFilter(req.user)
+
+        const patient = await prisma.patient.findFirst({
+            where: {id,deletedAt: null,...scopeFilter},
+            select: {id: true,mrn: true,firstName: true,lastName: true},
+        })
+        if(!patient) {
+            return errorResponse(res,'Patient not found or no access',404)
+        }
+
+        const page = parseInt(req.query.page || '1',10)
+        const limit = parseInt(req.query.limit || '10',10)
+        const skip = (page - 1)*limit
+
+        const [total,visits] = await Promise.all([
+            prisma.visit.count({where: {patientId: id}}),
+            prisma.visit.findMany({
+        where: { patientId: id },
+        orderBy: { visitDate: 'desc' },
+        skip,
+        take: limit,
+        select: {
+          id: true,
+          visitDate: true,
+          duration: true,
+          pipelineStatus: true,
+          audioFileUrl: true,
+          doctor: {
+            select: {
+              firstName: true,
+              lastName: true,
+              specialty: true,
+            },
+          },
+          soapNote: {
+            select: {
+              subjective: true,
+              objective: true,
+              assessment: true,
+              plan: true,
+              isFinalized: true,
+              finalizedAt: true,
+              auditHash: true,
+            },
+          },
+          nerResult: {
+            select: {
+              medications: true,
+              symptoms: true,
+              diagnoses: true,
+            },
+          },
+          drugInteractions: {
+            select: {
+              drug1: true,
+              drug2: true,
+              severity: true,
+              description: true,
+            },
+          },
+          billingCode: {
+            select: {
+              icd10Codes: true,
+              cptCode: true,
+              isConfirmed: true,
+            },
+          },
+        },
+      }),
+    ])
+
+    return paginatedResponse(
+      res,
+      visits,
+      { page, limit, total },
+      `Visits for patient ${patient.mrn} retrieved.`
+    )
+    } catch (error) {
+         logger.error('Get patient visits error:', error)
+      return errorResponse(res, 'Failed to retrieve patient visits.', 500, error)
+    }
+}
+
+export const getPatientStats = async (req,res) => {
+    try {
+        const {id} = req.params
+        const scopeFilter = buildScopeFilter(req.user)
+
+        const patient = await prisma.patient.findFirst({
+            where: {id,deletedAt: null,...scopeFilter},
+            select: {id: true,mrn: true}
+        })
+        if(!patient) {
+            return errorResponse(res,'Patient not found or no access',404)
+        }
+
+        const [totalVisits,lastVisit,totalAppointments,criticalInteractionCount,latestVitals] = await Promise.all([
+            prisma.visit.count({where: {patientId: id}}),
+
+            prisma.visit.findFirst({
+                where: {patientId: id},
+                orderBy: {visitDate: 'desc'},
+                select: {visitDate: true,pipelineStatus: true},
+            }),
+            
+            prisma.appointment.count({where: {patientId: id}}),
+
+            prisma.drugInteraction.count({
+                where: {visit: {patientId: id},severity: {in: ['HIGH','CRITICAL']}},
+            }),
+
+            prisma.patientTrend.findMany({
+        where: { patientId: id },
+        orderBy: { recordedAt: 'desc' },
+        distinct: ['metricType'],
+        select: {
+          metricType: true,
+          value: true,
+          unit: true,
+          recordedAt: true,
+        },
+      }),
+        ])
+
+        return successResponse(
+      res,
+      {
+        totalVisits,
+        lastVisit: lastVisit?.visitDate || null,
+        lastVisitStatus: lastVisit?.pipelineStatus || null,
+        totalAppointments,
+        criticalInteractionCount,
+        latestVitals,
+      },
+      'Patient stats retrieved.'
+    )
+  } catch (error) {
+    logger.error('Get patient stats error:', error)
+    return errorResponse(res, 'Failed to retrieve patient stats.', 500, error)
+  }
+}
+
+
+//Get active doctor list
+
+export const getActiveDoctors = async (req,res) => {
+    try {
+        const doctors = await prisma.user.findMany({
+            where: {
+                role: 'DOCTOR',
+                isActive: true,
+            },
+            select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                specialty: true,
+                _count: {
+          select: { patients: true },
+        },
+            },
+            orderBy: {firstName: 'asc'}
+        })
+
+        return successResponse(
+      res,
+      doctors,
+      'Active doctors retrieved.'
+    )
+  } catch (error) {
+    logger.error('Get active doctors error:', error)
+    return errorResponse(res, 'Failed to retrieve doctors.', 500, error)
+  }
+}
