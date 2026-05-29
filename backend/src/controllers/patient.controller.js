@@ -453,3 +453,142 @@ export const registerPatient = async (req,res) => {
     return errorResponse(res, "Failed to register patient.", 500, error);
     }
 }
+
+//Update demographics 
+//PUT /api/patients/:id/demographics
+//Receptionist + admin
+//Cannot touch clinical fields
+
+export const updateDemographics = async (req,res) => {
+    try {
+        const {id} = req.params
+
+        const whereClause = req.user.role === 'ADMIN' ? {id} : {id,deletedAt: null,isActive: true}
+
+        const existing = await prisma.patient.findFirst({
+            where: whereClause,
+            select: {id: true,mrn: true,firstName: true,lastName: true}
+        })
+
+        if(!existing) {
+            return errorResponse(res,'Patient not found or not accessible.',404)
+        }
+
+        const {firstName,lastName,dob,gender,nationality,preferredLanguage,phone,email,address,city,state,pincode,emergencyContactName,emergencyContactPhone,emergencyContactRel,primaryInsurance,insuranceNumber,secondaryInsurance} = req.body
+
+        const updatePayload = {}
+        const fields = {firstName,lastName,dob: dob ? new Date(dob): undefined,gender,nationality,preferredLanguage,phone,email,address,city,state,pincode,emergencyContactName,emergencyContactPhone,emergencyContactRel,primaryInsurance,insuranceNumber,secondaryInsurance,}
+
+        Object.entries(fields).forEach(([key,value]) => {
+            if(value !== undefined) updatePayload[key] = value
+        })
+
+        if(Object.keys(updatePayload).length === 0) {
+            return errorResponse(res,'No updates provided',400)
+        }
+
+        const update = await prisma.patient.update({
+            where: {id},
+            data: updatePayload,
+            select: getSelectByRole(req.user.role)
+        })
+
+        logger.info(
+      `Demographics updated: ${existing.mrn} by ${req.user.role} ${req.user.email}`
+    )
+
+    return successResponse(res, updated, 'Patient demographics updated successfully.')
+
+    } catch (error) {
+        logger.error('Update patient error',error)
+        return errorResponse(res,'Failed to update patient',500,error)
+    }
+}
+
+//Update clinical profile
+// PUT /api/patients/:id/clinical
+//Doctor(own patients) + admin
+
+export const updateClinicalProfile = async (req,res) => {
+    try {
+        const {id} = req.params
+
+        const scopeFilter = req.user.role === 'ADMIN' ? {} : {doctorId: req.user.id}
+        const existing = await prisma.patient.findFirst({
+            where: {
+                id,
+                deletedAt: null,
+                ...scopeFilter,
+            },
+            select: {
+                id: true,
+                mrn: true,
+                firstName: true,
+                lastName: true,
+                doctorId: true,
+            }
+        })
+
+        if (!existing) {
+      return errorResponse(
+        res,
+        'Patient not found or you do not have access to their clinical profile.',
+        404
+      )
+    }
+
+    const {bloodType,allergies,currentMedications,pastSurgeries,chronicConditions,familyHistory,referredBy,} = req.body
+
+    if(referredBy){
+        const referringDoctor = await prisma.user.findUnique({
+            where: {id: referredBy},
+            select: {id: true,role: true},
+        })
+        if (!referringDoctor || referringDoctor.role !== 'DOCTOR') {
+        return errorResponse(res, 'Referring doctor not found.', 404)
+      }
+    }
+    const updatePayload = {}
+    const clinicalFields = {
+      bloodType,
+      allergies,
+      currentMedications,
+      pastSurgeries,
+      chronicConditions,
+      familyHistory,
+      referredBy,
+    }
+
+    Object.entries(clinicalFields).forEach(([key, value]) => {
+      if (value !== undefined) updatePayload[key] = value
+    })
+
+    if (Object.keys(updatePayload).length === 0) {
+      return errorResponse(
+        res,
+        'No valid clinical fields provided for update.',
+        400
+      )
+    }
+
+    const updated = await prisma.patient.update({
+      where: { id },
+      data: updatePayload,
+      select: getSelectByRole(req.user.role),
+    })
+
+    logger.info(
+      `Clinical profile updated: ${existing.mrn} by Dr. ${req.user.email}`
+    )
+
+    return successResponse(
+      res,
+      updated,
+      'Clinical profile updated successfully.'
+    )
+
+    } catch (error) {
+        logger.error('Update clinical profile error:', error)
+    return errorResponse(res, 'Failed to update clinical profile.', 500, error)
+    }
+}
