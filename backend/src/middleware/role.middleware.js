@@ -27,16 +27,16 @@ export const allowRoles = (...roles) => {
 
 
 // Only system admin
-const adminOnly = allowRoles('ADMIN')
+export const adminOnly = allowRoles('ADMIN')
 
 // Clinical staff — can view and interact with clinical data
-const clinicalStaff = allowRoles('ADMIN', 'DOCTOR', 'NURSE')
+export const clinicalStaff = allowRoles('ADMIN', 'DOCTOR', 'NURSE')
 
 // Doctor and admin only — for write operations on clinical notes
-const doctorAndAdmin = allowRoles('ADMIN', 'DOCTOR')
+export const doctorAndAdmin = allowRoles('ADMIN', 'DOCTOR')
 
 // All authenticated users — for shared resources like appointments
-const allRoles = allowRoles('ADMIN', 'DOCTOR', 'NURSE', 'RECEPTIONIST')
+export const allRoles = allowRoles('ADMIN', 'DOCTOR', 'NURSE', 'RECEPTIONIST')
 
 
 export const selfOrAdmin = (paramName = 'id') => {
