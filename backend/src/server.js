@@ -15,6 +15,7 @@ import { errorResponse } from './utils/apiResponse.js'
 import { ensureTempDir } from './middleware/upload.middleware.js'
 
 import authRouter from './routes/auth.routes.js'
+import patientRouter from './routes/patient.route.js'
 
 
 
@@ -82,6 +83,7 @@ io.on('connection', (socket) => {
 
 //Routes
 app.use('/api/auth',authRouter)
+app.use('/api/patients',patientRouter)
 
 app.use((req, res) => {
     errorResponse(res, `Route ${req.method} ${req.originalUrl} not found`, 404)
