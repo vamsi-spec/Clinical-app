@@ -10,6 +10,7 @@
 
 import { prisma } from "../config/db"
 import { errorResponse, successResponse } from "../utils/apiResponse"
+import logger from "../utils/logger"
 
 export const listTransfers = async (req,res) => {
     try {
@@ -21,7 +22,7 @@ export const listTransfers = async (req,res) => {
         if(status) where.status = status
         switch (req.user.role) {
             case 'DOCTOR':
-                where.requestBy = req.user.id
+                where.requestedBy = req.user.id
                 break
             case 'RECEPTIONIST':
                 where.status = status || 'APPROVED'
@@ -359,5 +360,169 @@ export const reviewTransfer = async (req,res) => {
   } catch (error) {
     logger.error('Review transfer error:', error)
     return errorResponse(res,'Failed to review transfer request.',500,error)
+  }
+}
+
+//Excecute Transfer
+//Receptionist only
+//Executes an admin approved transfer
+
+export const executeTransfer = async (req,res) => {
+  try {
+    const {id} = req.params
+    const {confirmationNote} = req.body
+
+    const transfer = await prisma.transferRequest.findUnique({
+      where: {id},
+      select: {
+        id: true,
+        status: true,
+        patientId: true,
+        fromDoctorId: true,
+        toDoctorId: true,
+        patient: {
+          select: {
+            mrn: true,
+            firstName: true,
+            lastName: true,
+            doctorId: true,
+          },
+        },
+        fromDoctor: {
+          select: {firstName: true,lastName: true},
+        },
+        toDoctor: {
+          select: {firstName: true,lastName: true,speciality: true},
+        },
+      },
+    })
+
+    if(!transfer) {
+      return errorResponse(res,'Transfer request not found.',404)
+    }
+
+    if(transfer.status !== 'APPROVED') {
+      return errorResponse(res,`Cannot exexute a transfer that is not approved.${transfer.status.toLowerCase()}`,400)
+    }
+
+    if(transfer.patient.doctorId !== transfer.fromDoctorId) {
+      return errorResponse(res,'Patient is no longer under the original doctor.This transfer may be outdated. Contact admin.',409)
+    }
+
+    const toDoctor = await prisma.user.findUnique({
+      where: {id: transfer.toDoctorId},
+      select: {isActive: true},
+    })
+
+    if(!toDoctor?.isActive) {
+      return errorResponse(res,'Cannot execute - target doctor account is inactive. Please contact admin.',400)
+    }
+
+    await prisma.$transaction([
+      prisma.patient.update({
+        where: {id: transfer.patientId},
+        data: {doctorId: transfer.toDoctorId},
+      }),
+
+      prisma.transferRequest.update({
+        where: {id},
+        data: {
+          status:'COMPLETED',
+          executedBy: req.user.id,
+          executedAt: new Date(),
+          adminNote: confirmationNote ? `${transfer.adminNote || ''}\nExecution note: ${confirmationNote}`.trim()
+            : transfer.adminNote,
+        }
+      })
+    ])
+
+    logger.info(
+      `Transfer executed by receptionist ${req.user.email}: patient ${transfer.patient.mrn} moved from Dr. ${transfer.fromDoctor.firstName} ${transfer.fromDoctor.lastName} to Dr. ${transfer.toDoctor.firstName} ${transfer.toDoctor.lastName}`
+    )
+
+    if(req.io) {
+      req.io.emit('transfer:completed',{
+        transferId: id,
+        patientMrn: transfer.patient.mrn,
+        newDoctorId: transfer.toDoctorId,
+      })
+
+      req.io.emit('patient:assigned',{patientMrn})
+    }
+
+    return successResponse(res,null,`Transfer executed for patient ${transfer.patient.mrn}. The patient is now under the care of Dr. ${transfer.toDoctor.firstName} ${transfer.toDoctor.lastName}`)
+
+  } catch (error) {
+    logger.error('Execute transfer error:',error)
+    return errorResponse(res,'Failed to execute transfer.',500,error)
+  }
+}
+
+//Cancel transfer request
+//doctor - can cancel their own pending req  ,Admin - can cancel any pending or approved req
+
+export const cancelTransfer = async (req,res) => {
+  try {
+    const {id} = req.params
+    const {cancelNote} = req.body
+
+    const transfer = await prisma.transferRequest.findUnique({
+      where: {id},
+      select: {
+        id: true,
+        status: true,
+        requestedBy: true,
+        patient: {
+          select: {mrn: true,firstName: true,lastName: true},
+        }
+      }
+    })
+
+    if(!transfer) {
+      return errorResponse(res,'Transfer request not found.',404)
+    }
+
+    if(req.user.role === 'DOCTOR' && transfer.requestedBy !== req.user.id) {
+      return errorResponse(res,'You can only cancel your own transfer request.',403)
+    }
+
+    if(req.user.role === 'DOCTOR' && transfer.status !== 'PENDING') {
+      return errorResponse(
+        res,
+        `Cannot cancel a request that is already ${transfer.status.toLowerCase()}. Contact admin if needed.`,
+        400
+      )
+    }
+
+     if (['COMPLETED', 'CANCELLED', 'REJECTED'].includes(transfer.status)) {
+      return errorResponse(
+        res,
+        `Transfer request is already ${transfer.status.toLowerCase()}.`,
+        400
+      )
+    }
+
+    await prisma.transferRequest.update({
+      where: {id},
+      data: {
+        status: 'CANCELLED',
+        cancelledBy: req.user.id,
+        cancelledAt: new Date(),
+        cancelNote,
+      },
+    })
+
+    logger.info(
+      `Transfer cancelled by ${req.user.role} ${req.user.email}: patient ${transfer.patient.mrn}. Note: ${cancelNote}`
+    )
+
+    return successResponse(
+      res,
+      null,
+      `Transfer request for patient ${transfer.patient.mrn} has been cancelled.`
+    )
+  } catch (error) {
+    logger.error('Cancel transfer error:', error)
+    return errorResponse(res, 'Failed to cancel transfer request.', 500, error)
   }
 }
