@@ -286,3 +286,78 @@ export const requestTransfer = async (req,res) => {
     return errorResponse(res, 'Failed to submit transfer request.', 500, error)
   }
 }
+
+
+//Review Transfer - Approve or Reject
+//Admin only
+export const reviewTransfer = async (req,res) => {
+  try {
+    const {id} = req.params
+    const {decision,adminNote} = req.body
+
+    const transfer = await prisma.transferRequest.findUnique({
+      where: {id},
+      select: {
+        id: true,
+        status: true,
+        patientId: true,
+        fromDoctorId: true,
+        toDoctorId: true,
+        patient: {
+          select: {mrn: true,firstName: true,lastName: true},
+        },
+        fromDoctor: {
+          select: {firstName: true,lastName: true},
+        },
+        toDoctor: {
+          select: {firstName: true,lastName: true},
+        },
+      }
+    })
+
+    if(!transfer) {
+      return errorResponse(res,'Transfer request not found.',404)
+    }
+
+    if(transfer.status !== 'PENDING') {
+      return errorResponse(res,`Cannot review a transfer request that is already ${transfer.status.toLowerCase()}.`,400)
+    }
+    const toDoctor = await prisma.user.findUnique({
+      where: {id: transfer.toDoctorId},
+      select: {isActive: true},
+    })
+
+    if(decision === 'APPROVED' && !toDoctor?.isActive) {
+      return errorResponse(res,'Cannot approve - target doctor account is currently inactive.',400)
+    }
+
+    await prisma.transferRequest.update({
+      where: {id},
+      data: {
+        status: decision,
+        adminNote,
+        reviewedBy: req.user.id,
+        reviewedBy: new Date()
+      },
+    })
+
+    logger.info(`Transfer ${decision} by admin ${req.user.email}: patient ${transfer.patient.mrn}. Note: ${adminNote}`)
+
+    if(req.io) {
+      req.io.emit('transfer:reviewed',{
+        transferId: id,
+        decision,
+        patientMrn: transfer.patient.mrn,
+      })
+    }
+
+    const message = decision === 'APPROVED' ? `Transfer approved for patient ${transfer.patient.mrn}. Receptionist can now execute the transfer.`
+        : `Transfer rejected for patient ${transfer.patient.mrn}. Doctor has been notified.`
+    
+    return successResponse(res,null,message)
+
+  } catch (error) {
+    logger.error('Review transfer error:', error)
+    return errorResponse(res,'Failed to review transfer request.',500,error)
+  }
+}
