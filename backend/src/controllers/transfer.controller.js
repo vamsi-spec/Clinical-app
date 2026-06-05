@@ -8,7 +8,7 @@
 //List Transfer requests
 //For each role sees their relevant requests
 
-import { prisma } from "../config/db"
+import {prisma} from "../config/db.js";
 import { errorResponse, successResponse } from "../utils/apiResponse"
 import logger from "../utils/logger"
 
