@@ -11,10 +11,13 @@ const ACTION_MAP = {
 
   // Patients
   'GET /api/patients': 'LIST_PATIENTS',
-  'POST /api/patients': 'CREATE_PATIENT',
+  'POST /api/patients': 'REGISTER_PATIENT',
   'GET /api/patients/:id': 'VIEW_PATIENT',
   'PUT /api/patients/:id': 'UPDATE_PATIENT',
+  'PUT /api/patients/:id/demographics': 'UPDATE_PATIENT',
+  'PUT /api/patients/:id/clinical': 'UPDATE_PATIENT',
   'DELETE /api/patients/:id': 'DELETE_PATIENT',
+  'PUT /api/patients/:id/restore': 'RESTORE_PATIENT',
 
   // Visits
   'POST /api/visits': 'CREATE_VISIT',
@@ -39,10 +42,10 @@ export const resolveAction = (method,url) => {
     const patternUrl = cleanUrl.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi,
     ':id')
 
-    const patternKey = `${method}${patternUrl}`
+    const patternKey = `${method} ${patternUrl}`
 
     if(ACTION_MAP[patternKey]) return ACTION_MAP[patternKey]
-    return `${method}${cleanUrl}`
+    return `${method} ${cleanUrl}`
 }
 
 
@@ -89,7 +92,8 @@ export const auditLog = (req,res,next) => {
       if (res.statusCode >= 500) return
 
       const action = resolveAction(req.method,req.originalUrl)
-      const {resourceType,resourceId} = extractResourceInfo(req)
+      const {resourceType,resourceId: urlResourceId} = extractResourceInfo(req)
+      const resourceId = req.auditResourceId || urlResourceId
 
       const metadata = {
         statusCode: res.statusCode,

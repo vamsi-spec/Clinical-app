@@ -16,8 +16,8 @@ import { ensureTempDir } from './middleware/upload.middleware.js'
 
 import authRouter from './routes/auth.routes.js'
 import patientRouter from './routes/patient.route.js'
-
-
+import transferRouter from './routes/transfer.routes.js'
+import appointmentRouter from './routes/appointment.routes.js'
 
 
 dotenv.config()
@@ -84,6 +84,8 @@ io.on('connection', (socket) => {
 //Routes
 app.use('/api/auth',authRouter)
 app.use('/api/patients',patientRouter)
+app.use('/api/appointments',appointmentRouter)
+app.use('/api/transfers',transferRouter)
 
 app.use((req, res) => {
     errorResponse(res, `Route ${req.method} ${req.originalUrl} not found`, 404)

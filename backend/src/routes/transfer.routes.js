@@ -1,12 +1,12 @@
 import express from 'express'
-import { apiLimiter } from '../middleware/rateLimiter.middleware'
-import { protect } from '../middleware/auth.middleware'
-import { auditLog } from '../middleware/audit.middleware'
-import { adminOnly, allowRoles } from '../middleware/role.middleware'
-import { validate, validateParams, validateQuery } from '../middleware/validate.middleware'
-import { cancelTransferRequestSchema, executeTransferSchema, requestTransferSchema, reviewTransferSchema, transferQuerySchema } from '../validators/transfer.validators'
-import { cancelTransfer, executeTransfer, getTransfer, listTransfers, requestTransfer, reviewTransfer } from '../controllers/transfer.controller'
-import { idParamSchema } from '../validators/patient.validators'
+import { apiLimiter } from '../middleware/rateLimiter.middleware.js'
+import { protect } from '../middleware/auth.middleware.js'
+import { auditLog } from '../middleware/audit.middleware.js'
+import { adminOnly, allowRoles } from '../middleware/role.middleware.js'
+import { validate, validateParams, validateQuery } from '../middleware/validate.middleware.js'
+import { cancelTransferRequestSchema, executeTransferSchema, requestTransferSchema, reviewTransferSchema, transferQuerySchema } from '../validators/transfer.validators.js'
+import { cancelTransfer, executeTransfer, getTransfer, listTransfers, requestTransfer, reviewTransfer } from '../controllers/transfer.controller.js'
+import { idParamSchema } from '../validators/patient.validators.js'
 const transferRouter = express.Router()
 
 

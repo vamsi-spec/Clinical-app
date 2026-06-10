@@ -1,11 +1,11 @@
 import express from 'express'
-import { protect } from '../middleware/auth.middleware'
-import { apiLimiter } from '../middleware/rateLimiter.middleware'
-import { auditLog } from '../middleware/audit.middleware'
-import { allowRoles, allRoles } from '../middleware/role.middleware'
-import { getActiveDoctors, getPatient, listPatients, registerPatient, updateDemographics } from '../controllers/patient.controller'
-import { validate, validateParams, validateQuery } from '../middleware/validate.middleware'
-import { idParamSchema, patientQuerySchema, registerPatientSchema } from '../validators/patient.validators'
+import { protect } from '../middleware/auth.middleware.js'
+import { apiLimiter } from '../middleware/rateLimiter.middleware.js'
+import { auditLog } from '../middleware/audit.middleware.js'
+import { allowRoles, allRoles, doctorAndAdmin, clinicalStaff, adminOnly } from '../middleware/role.middleware.js'
+import { getActiveDoctors, getPatient, listPatients, registerPatient, updateDemographics, updateClinicalProfile, getPatientVisits, getPatientStats, archivePatient, restorePatient } from '../controllers/patient.controller.js'
+import { validate, validateParams, validateQuery } from '../middleware/validate.middleware.js'
+import { idParamSchema, patientQuerySchema, registerPatientSchema, updateDemographicsSchema, updateClinicalProfileSchema, archivePatientSchema } from '../validators/patient.validators.js'
 
 
 const patientRouter = express.Router()

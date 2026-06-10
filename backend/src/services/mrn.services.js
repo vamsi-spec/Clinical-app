@@ -1,9 +1,9 @@
-import { prisma } from "../config/db"
-import logger from "../utils/logger"
+import { prisma } from "../config/db.js"
+import logger from "../utils/logger.js"
 
 
 
-const generateMRN = async () => {
+export const generateMRN = async () => {
   const year = new Date().getFullYear()
   const prefix = `MRN-${year}-`
 
@@ -38,14 +38,14 @@ const generateMRN = async () => {
 }
 
 
-const isValidMRN = (mrn) => {
+export const isValidMRN = (mrn) => {
   // MRN-YYYY-NNNNN format
   const mrnRegex = /^MRN-\d{4}-\d{5}$/
   return mrnRegex.test(mrn)
 }
 
 
-const generateUniqueMRN = async (maxRetries = 3) => {
+export const generateUniqueMRN = async (maxRetries = 3) => {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     const mrn = await generateMRN()
 

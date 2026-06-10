@@ -46,7 +46,7 @@ const getSelectByRole = (role) => {
         id: true,
         firstName: true,
         lastName: true,
-        specialty: true,
+        speciality: true,
       },
     },
 }
@@ -212,14 +212,14 @@ export const getPatient = async (req,res) => {
             const upcomingAppointments = await prisma.appointment.findMany({
                 where: {
                     patientId: id,
-                    sheduledAt: {gte: new Date()},
+                    scheduledAt: {gte: new Date()},
                     status: 'SCHEDULED'
                 },
-                orderBy: {sheduledAt: 'asc'},
+                orderBy: {scheduledAt: 'asc'},
                 take: 5,
                 select: {
                     id: true,
-                    sheduledAt: true,
+                    scheduledAt: true,
                     endsAt: true,
                     duration: true,
                     type: true,
@@ -229,7 +229,7 @@ export const getPatient = async (req,res) => {
                         select: {
                             firstName: true,
                             lastName: true,
-                            specialty: true,
+                            speciality: true,
                         }
                     }
                 }
@@ -255,7 +255,7 @@ export const getPatient = async (req,res) => {
                         pipelineStatus: true,
                         duration: true,
                         doctor: {
-                        select: { firstName: true, lastName: true, specialty: true },
+                        select: { firstName: true, lastName: true, speciality: true },
                         },
             soapNote: {
               select: {
@@ -273,11 +273,11 @@ export const getPatient = async (req,res) => {
                 scheduledAt: {gte: new Date()},
                 status: 'SCHEDULED'
             },
-            orderBy: {sheduledAt: 'asc'},
+            orderBy: {scheduledAt: 'asc'},
             take: 3,
             select: {
                 id: true,
-                sheduledAt: true,
+                scheduledAt: true,
                 duration: true,
                 type: true,
                 chiefComplaint: true,
@@ -285,7 +285,7 @@ export const getPatient = async (req,res) => {
                     select: {
                         firstName: true,
                         lastName: true,
-                        specialty: true,
+                        speciality: true,
                     }
                 }
             }
@@ -399,10 +399,11 @@ export const registerPatient = async (req,res) => {
         if(emailDuplicate) {
             return errorResponse(res, `Email already in use by existing patient.`, 409)
         }
+    }
 
-        const mrn = await generateUniqueMRN()
+    const mrn = await generateUniqueMRN()
 
-        const patient = await prisma.patient.create({
+    const patient = await prisma.patient.create({
       data: {
         mrn,
         doctorId,
@@ -440,13 +441,14 @@ export const registerPatient = async (req,res) => {
       `Patient registered: ${mrn} by receptionist ${req.user.email} under Dr. ${doctor.firstName} ${doctor.lastName}`
     )
 
+    req.auditResourceId = patient.id
+
     return successResponse(
       res,
       patient,
       `Patient registered successfully. MRN: ${mrn}. Dr. ${doctor.firstName} ${doctor.lastName} has been assigned.`,
       201
     )
-    }
 
     } catch (error) {
         logger.error("Register patient error:", error);
@@ -629,7 +631,7 @@ export const archivePatient = async (req,res) => {
             prisma.appointment.updateMany({
                 where: {
                     patientId: id,
-                    sheduledAt: {gte: new Date()},
+                    scheduledAt: {gte: new Date()},
                     status: 'SCHEDULED',
                 },
                 data: {
@@ -760,7 +762,7 @@ export const getPatientVisits = async (req,res) => {
             select: {
               firstName: true,
               lastName: true,
-              specialty: true,
+              speciality: true,
             },
           },
           soapNote: {
@@ -885,7 +887,7 @@ export const getActiveDoctors = async (req,res) => {
                 id: true,
                 firstName: true,
                 lastName: true,
-                specialty: true,
+                speciality: true,
                 _count: {
           select: { patients: true },
         },

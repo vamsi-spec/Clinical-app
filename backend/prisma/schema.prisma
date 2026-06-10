@@ -81,7 +81,7 @@ model User {
     transferRequestsRaised    TransferRequest[] @relation("TransferFrom")
     transferRequestsReceiving TransferRequest[] @relation("TransferTo")
 
-    patients Patient[] 
+    patients Patient[] @relation("PatientDoctor") 
     visits   Visit[]
     appointments Appointment[]
     auditLogs  AuditLog[]

@@ -9,8 +9,8 @@
 //For each role sees their relevant requests
 
 import {prisma} from "../config/db.js";
-import { errorResponse, successResponse } from "../utils/apiResponse"
-import logger from "../utils/logger"
+import { errorResponse, successResponse, paginatedResponse } from "../utils/apiResponse.js";
+import logger from "../utils/logger.js";
 
 export const listTransfers = async (req,res) => {
     try {
@@ -129,7 +129,7 @@ export const getTransfer = async (req,res) => {
             id: true,
             firstName: true,
             lastName: true,
-            specialty: true,
+            speciality: true,
           },
         },
         toDoctor: {
@@ -137,7 +137,7 @@ export const getTransfer = async (req,res) => {
             id: true,
             firstName: true,
             lastName: true,
-            specialty: true,
+            speciality: true,
           },
         },
       },
@@ -258,7 +258,7 @@ export const requestTransfer = async (req,res) => {
           select: { firstName: true, lastName: true },
         },
         toDoctor: {
-          select: { firstName: true, lastName: true, specialty: true },
+          select: { firstName: true, lastName: true, speciality: true },
         },
       },
     })

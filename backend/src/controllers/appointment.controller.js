@@ -1,8 +1,7 @@
-import { error } from "winston";
 import {prisma} from "../config/db.js";
 
 import logger from "../utils/logger.js";
-import { errorResponse } from "../utils/apiResponse";
+import { errorResponse, successResponse, paginatedResponse } from "../utils/apiResponse.js";
 
 
 //Conflict detection
@@ -144,7 +143,7 @@ export const listAppointments = async (req,res) => {
               id: true,
               firstName: true,
               lastName: true,
-              specialty: true,
+              speciality: true,
             },
           },
         },
@@ -212,7 +211,7 @@ export const getAppointment = async (req,res) => {
                         id: true,
                         firstName: true,
                         lastName: true,
-                        specialty: true
+                        speciality: true
                     }
                 }
             }
@@ -235,14 +234,10 @@ export const createAppointment = async (req,res) => {
     try {
         const {patientId,doctorId: bodyDoctorId,scheduledAt,duration,bufferMinutes,type,chiefComplaint,notes,isWalkIn,followUpOf} = req.body
 
-        if(req.user.role === 'DOCTOR') {
-            doctorId = req.user.id
-        }
-        else{
-            if(!bodyDoctorId) {
-                return errorResponse(res,'doctorId is required when booking as Receptionist or admin.',400)
-            }
-            doctorId = bodyDoctorId
+        const doctorId = req.user.role === 'DOCTOR' ? req.user.id : bodyDoctorId
+
+        if (req.user.role !== 'DOCTOR' && !doctorId) {
+            return errorResponse(res, 'doctorId is required when booking as Receptionist or admin.', 400)
         }
 
         const doctor = await prisma.user.findUnique({
@@ -344,7 +339,7 @@ export const createAppointment = async (req,res) => {
           select: { id: true, mrn: true, firstName: true, lastName: true },
         },
         doctor: {
-          select: { id: true, firstName: true, lastName: true, specialty: true },
+          select: { id: true, firstName: true, lastName: true, speciality: true },
         },
       },
     })
@@ -550,7 +545,7 @@ export const markNoShow = async (req,res) => {
                 status: true,
                 scheduledAt: true,
                 patient: {
-                    select: {mrn: true,firstName: true,lastName},
+                    select: {mrn: true,firstName: true,lastName: true},
                 },
             }
         })
@@ -647,5 +642,148 @@ export const completeAppointment = async (req,res) => {
   } catch (error) {
     logger.error('Complete appointment error:', error)
     return errorResponse(res, 'Failed to complete appointment.', 500, error)
+  }
+}
+
+
+export const getTodaySchedule = async (req,res) => {
+  try {
+    const scopeFilter = buildScopeFilter(req.user)
+
+    const todayStart = new Date()
+    todayStart.setHours(0,0,0,0)
+
+    const todayEnd = new Date()
+    todayEnd.setHours(23,59,59,999)
+
+    const appointments = await prisma.appointment.findMany({
+      where: {
+        ...scopeFilter,
+        scheduledAt: { gte: todayStart, lte: todayEnd },
+      },
+      orderBy: { scheduledAt: 'asc' },
+      select: {
+        id: true,
+        scheduledAt: true,
+        endsAt: true,
+        duration: true,
+        status: true,
+        type: true,
+        chiefComplaint: true,
+        isWalkIn: true,
+        patient: {
+          select: {
+            id: true,
+            mrn: true,
+            firstName: true,
+            lastName: true,
+            phone: true,
+            ...(req.user.role !== 'RECEPTIONIST' && {
+              allergies: true,
+              currentMedications: true,
+              chronicConditions: true,
+            }),
+          },
+        },
+        doctor: {
+          select: {
+            firstName: true,
+            lastName: true,
+            speciality: true,
+          },
+        },
+      },
+    })
+
+    const summary = {
+      total: appointments.length,
+      scheduled: appointments.filter((a) => a.status === 'SCHEDULED').length,
+      completed: appointments.filter((a) => a.status === 'COMPLETED').length,
+      cancelled: appointments.filter((a) => a.status === 'CANCELLED').length,
+      noShow: appointments.filter((a) => a.status === 'NO_SHOW').length,
+    }
+
+    return successResponse(
+      res,
+      { summary, appointments },
+      "Today's schedule retrieved."
+    )
+  } catch (error) {
+    logger.error('Get today schedule error:', error)
+    return errorResponse(res, "Failed to retrieve today's schedule.", 500, error)
+  }
+}
+
+
+export const checkAvailability = async (req,res) => {
+  try {
+    const {doctorId,date,duration} = req.query
+
+    const slotDuration = parseInt(duration, 10) || 30
+
+    const dayStart = new Date(date)
+    dayStart.setHours(8,0,0,0)
+
+    const dayEnd = new Date(date)
+    dayEnd.setHours(20,0,0,0)
+
+    const bookedSlots = await prisma.appointment.findMany({
+      where: {
+        doctorId,
+        status: 'SCHEDULED',
+        scheduledAt: {
+          gte: dayStart,
+          lt: dayEnd
+        }
+      },
+      select: {
+        scheduledAt: true,
+        endsAt: true,
+        patient: {firstName: true,lastName: true},
+      },
+      orderBy: { scheduledAt: 'asc' },
+    })
+
+    const slots = []
+    const cursor = new Date(dayStart)
+
+    while(cursor <= new Date(dayEnd.getTime() - slotDuration * 60 * 1000)) {
+      const slotStart = new Date(cursor)
+
+      const slotEnd = new Date(cursor.getTime() + slotDuration * 60 * 1000)
+
+      const isBooked = bookedSlots.some((b) => {
+        const bStart = new Date(b.scheduledAt)
+        const bEnd = new Date(b.endsAt)
+        return slotStart < bEnd && slotEnd > bStart
+      })
+slots.push({
+        time: slotStart.toISOString(),
+        timeFormatted: slotStart.toLocaleTimeString('en-IN', {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: true,
+        }),
+        available: !isBooked,
+      })
+
+      cursor.setMinutes(cursor.getMinutes() + 30)
+    }
+
+    return successResponse(
+      res,
+      {
+        date,
+        doctorId,
+        totalSlots: slots.length,
+        availableSlots: slots.filter((s) => s.available).length,
+        bookedSlots: slots.filter((s) => !s.available).length,
+        slots,
+      },
+      'Availability retrieved.'
+    )
+  } catch (error) {
+    logger.error('Check availability error:', error)
+    return errorResponse(res, 'Failed to check availability.', 500, error)
   }
 }
