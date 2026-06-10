@@ -7,7 +7,7 @@ import logger from '../utils/logger.js'
 
 export const authLimiter = rateLimit({
     windowMs: 15*60*1000,
-    max: 5,
+    max: 100,
     standardHeaders: true,
     legacyHeaders: false,
     skipSuccessfulRequests: false,

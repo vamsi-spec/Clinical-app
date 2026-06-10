@@ -44,6 +44,20 @@ async function main() {
     })
     console.log('✅ Doctor created:', doctor.email)
 
+    const doctor2 = await prisma.user.upsert({
+        where: { email: 'doctor2@clinic.com' },
+        update: {},
+        create: {
+            email: 'doctor2@clinic.com',
+            passwordHash: doctorHash,
+            firstName: 'Vikram',
+            lastName: 'Mehta',
+            role: 'DOCTOR',
+            speciality: 'Cardiology',
+        },
+    })
+    console.log('✅ Doctor 2 created:', doctor2.email)
+
     // ============================================
     // NURSE — assigned to doctor above
     // ============================================
@@ -84,6 +98,7 @@ async function main() {
     // ============================================
     const patients = [
         {
+            id: 'a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d',
             firstName: 'Rajesh',
             lastName: 'Verma',
             mrn: 'MRN-2026-00001',
@@ -95,6 +110,7 @@ async function main() {
             phone: '+91-9876543210',
         },
         {
+            id: 'b2c3d4e5-f6a7-8b9c-0d1e-2f3a4b5c6d7e',
             firstName: 'Sunita',
             lastName: 'Devi',
             mrn: 'MRN-2026-00002',
@@ -106,6 +122,7 @@ async function main() {
             phone: '+91-9876543211',
         },
         {
+            id: 'c3d4e5f6-a7b8-9c0d-1e2f-3a4b5c6d7e8f',
             firstName: 'Mohammed',
             lastName: 'Iqbal',
             mrn: 'MRN-2026-00003',
@@ -119,14 +136,12 @@ async function main() {
     ]
 
     for (const patientData of patients) {
-        const patientId = `seed-${patientData.firstName.toLowerCase()}-${patientData.lastName.toLowerCase()}`
         const patient = await prisma.patient.upsert({
             where: {
-                id: patientId,
+                id: patientData.id,
             },
             update: {},
             create: {
-                id: patientId,
                 doctorId: doctor.id,
                 ...patientData,
             },
@@ -144,11 +159,11 @@ async function main() {
     const endsAt = new Date(tomorrow.getTime() + 30 * 60 * 1000)
 
     await prisma.appointment.upsert({
-        where: { id: 'seed-appointment-1' },
+        where: { id: 'd4e5f6a7-b8c9-0d1e-2f3a-4b5c6d7e8f9a' },
         update: {},
         create: {
-            id: 'seed-appointment-1',
-            patientId: 'seed-rajesh-verma',
+            id: 'd4e5f6a7-b8c9-0d1e-2f3a-4b5c6d7e8f9a',
+            patientId: 'a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d',
             doctorId: doctor.id,
             scheduledAt: tomorrow,
             endsAt,

@@ -338,7 +338,7 @@ export const reviewTransfer = async (req,res) => {
         status: decision,
         adminNote,
         reviewedBy: req.user.id,
-        reviewedBy: new Date()
+        reviewedAt: new Date()
       },
     })
 
@@ -447,7 +447,7 @@ export const executeTransfer = async (req,res) => {
         newDoctorId: transfer.toDoctorId,
       })
 
-      req.io.emit('patient:assigned',{patientMrn})
+      req.io.emit('patient:assigned',{patientMrn: transfer.patient.mrn})
     }
 
     return successResponse(res,null,`Transfer executed for patient ${transfer.patient.mrn}. The patient is now under the care of Dr. ${transfer.toDoctor.firstName} ${transfer.toDoctor.lastName}`)

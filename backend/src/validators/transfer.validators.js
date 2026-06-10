@@ -8,7 +8,7 @@ const uuidSchema = z.string().uuid('Must be a valid UUID')
 export const requestTransferSchema = z.object({
     patientId: uuidSchema,
 
-    toDoctorID: uuidSchema,
+    toDoctorId: uuidSchema,
 
     reason: z
     .string()

@@ -739,7 +739,7 @@ export const checkAvailability = async (req,res) => {
       select: {
         scheduledAt: true,
         endsAt: true,
-        patient: {firstName: true,lastName: true},
+        patient: { select: { firstName: true, lastName: true } },
       },
       orderBy: { scheduledAt: 'asc' },
     })
