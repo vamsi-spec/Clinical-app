@@ -44,7 +44,7 @@ pip-log.txt
 *.h5
 *.pkl
 *.joblib
-models/
+/models/
 .cache/
 
 # ============================================
