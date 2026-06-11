@@ -63,3 +63,46 @@ def score_segment(segment: RawWhisperSegment,threshold: Optional[float]=None) ->
 
 
     
+def score_all_segments(
+    whisper_result: WhisperRawResult,
+    threshold: Optional[float] = None
+)-> list[ScoredSegment]:
+
+
+    if not whisper_result.segments:
+        logger.warning("No segments to score - empty transcript")
+        return []
+
+    scored = []
+    low_confidence_count = 0
+    for segment in whisper_result.segments:
+        scored_segment = score_segment(segment,threshold)
+        scored.append(scored_segment)
+
+        if scored_segment.needs_review:
+            low_confidence_count += 1
+            logger.debug(f"Low confidence segment at {segment.start:.1f}s:"f"'{segment.text[:50]}...' "
+                f"(confidence: {scored_segment.confidence:.2f})")
+    
+    total = len(scored)
+    review_percent = (low_confidence_count / total*100) if total > 0 else 0
+
+    logger.info(
+        f"Confidence scoring complete: {total} segments, "
+        f"{low_confidence_count} need review ({review_percent:.1f}%)"
+    )
+
+    if review_percent > 40:
+        logger.warning(
+            f"High review rate ({review_percent:.1f}%) — "
+            "possible audio quality issue or language mismatch. "
+            "Consider checking audio recording conditions."
+        )
+
+    return scored
+
+
+
+    
+
+    
