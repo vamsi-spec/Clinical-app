@@ -170,8 +170,3 @@ def find_low_confidence_words(segment: ScoredSegment,word_threshold: float=0.5) 
         )
     
     return low_confidence_words
-
-
-    
-
-    
