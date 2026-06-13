@@ -910,7 +910,36 @@ def assign_speakers_to_segments(
 
     
     
+def get_diarization_stats(
+    diarization_segments: list[DiarizationSegment],
+    role_map: dict[str, SpeakerRole],
+) -> dict:
+    """
+    Calculate statistics from diarization output.
+    Used for logging and frontend display.
+    """
+    if not diarization_segments:
+        return {
+            "available": False,
+            "speaker_count": 0,
+            "speakers": {},
+        }
 
+    speaker_stats = {}
+    for speaker_id, role in role_map.items():
+        turns = [s for s in diarization_segments if s.speaker == speaker_id]
+        total_time = sum(s.end - s.start for s in turns)
+        speaker_stats[speaker_id] = {
+            "role": role.value,
+            "turns": len(turns),
+            "total_speaking_time_seconds": round(total_time, 1),
+        }
+
+    return {
+        "available": True,
+        "speaker_count": len(role_map),
+        "speakers": speaker_stats,
+    }
 
 
 
