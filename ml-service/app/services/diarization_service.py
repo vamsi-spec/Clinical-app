@@ -3,6 +3,7 @@ import logging
 import os
 import re
 import json
+import copy
 from pathlib import Path
 from typing import Optional, List, Dict
 
@@ -116,32 +117,136 @@ def align_whisper_with_diarization(
     diarization_segments: list[DiarizationSegment]
 ) -> list:
     """
-    Aligns Whisper segments with Pyannote speaker turns using maximum time overlap.
-    Mutates/updates the Whisper segments by setting their 'speaker' attribute.
+    Aligns Whisper transcript segments with Pyannote speaker turns at the word level.
+    Groups consecutive words belonging to the same speaker into clean text turns.
+    If a segment has no word-level timestamps, falls back to segment-level overlap.
     """
     if not whisper_segments:
         return []
-    for w_seg in whisper_segments:
-        best_speaker = "UNKNOWN"
-        max_overlap = 0.0
-        
-        # Calculate overlap duration with each diarization turn
-        for d_seg in diarization_segments:
-            overlap_start = max(w_seg.start, d_seg.start)
-            overlap_end = min(w_seg.end, d_seg.end)
-            overlap = max(0.0, overlap_end - overlap_start)
+    if not diarization_segments:
+        # No diarization available, assign speaker="UNKNOWN" to all segments
+        for seg in whisper_segments:
+            if isinstance(seg, dict):
+                seg["speaker"] = "UNKNOWN"
+            else:
+                setattr(seg, "speaker", "UNKNOWN")
+        return whisper_segments
+
+    aligned_turns = []
+    current_speaker = None
+    current_words = []
+    
+    seg_id = 0
+
+    for seg in whisper_segments:
+        # Extract word timestamps if available
+        words = getattr(seg, "words", None)
+        if words is None and isinstance(seg, dict):
+            words = seg.get("words")
             
-            if overlap > max_overlap:
-                max_overlap = overlap
-                best_speaker = d_seg.speaker
+        # Fallback to segment-level alignment if no word timestamps are found
+        if not words:
+            best_speaker = "UNKNOWN"
+            max_overlap = 0.0
+            
+            s_start = seg.get("start", 0.0) if isinstance(seg, dict) else getattr(seg, "start", 0.0)
+            s_end = seg.get("end", 0.0) if isinstance(seg, dict) else getattr(seg, "end", 0.0)
+            s_text = seg.get("text", "") if isinstance(seg, dict) else getattr(seg, "text", "")
+            
+            for d_seg in diarization_segments:
+                overlap_start = max(s_start, d_seg.start)
+                overlap_end = min(s_end, d_seg.end)
+                overlap = max(0.0, overlap_end - overlap_start)
                 
-        # Set speaker attribute on segment (or dictionary)
-        if isinstance(w_seg, dict):
-            w_seg["speaker"] = best_speaker
-        else:
-            setattr(w_seg, "speaker", best_speaker)
+                if overlap > max_overlap:
+                    max_overlap = overlap
+                    best_speaker = d_seg.speaker
             
-    return whisper_segments
+            # Flush accumulated words if speaker changes
+            if current_words:
+                aligned_turns.append({
+                    "id": seg_id,
+                    "speaker": current_speaker,
+                    "start": current_words[0]["start"],
+                    "end": current_words[-1]["end"],
+                    "text": " ".join([w["word"] for w in current_words]),
+                    "words": [w["raw_obj"] for w in current_words]
+                })
+                seg_id += 1
+                current_words = []
+                current_speaker = None
+                
+            aligned_turns.append({
+                "id": seg_id,
+                "speaker": best_speaker,
+                "start": s_start,
+                "end": s_end,
+                "text": s_text,
+                "words": []
+            })
+            seg_id += 1
+            continue
+
+        # Map each word to a speaker based on diarization overlap
+        for w in words:
+            w_start = w.get("start", 0.0) if isinstance(w, dict) else getattr(w, "start", 0.0)
+            w_end = w.get("end", 0.0) if isinstance(w, dict) else getattr(w, "end", 0.0)
+            w_text = w.get("word", "") if isinstance(w, dict) else getattr(w, "word", "")
+                
+            best_speaker = "UNKNOWN"
+            max_overlap = 0.0
+            
+            for d_seg in diarization_segments:
+                overlap_start = max(w_start, d_seg.start)
+                overlap_end = min(w_end, d_seg.end)
+                overlap = max(0.0, overlap_end - overlap_start)
+                
+                if overlap > max_overlap:
+                    max_overlap = overlap
+                    best_speaker = d_seg.speaker
+            
+            # Default to containing segment midpoint if zero overlap
+            if max_overlap == 0.0:
+                midpoint = (w_start + w_end) / 2
+                for d_seg in diarization_segments:
+                    if d_seg.start <= midpoint <= d_seg.end:
+                        best_speaker = d_seg.speaker
+                        break
+            
+            # Flush buffer on speaker transition
+            if best_speaker != current_speaker:
+                if current_words:
+                    aligned_turns.append({
+                        "id": seg_id,
+                        "speaker": current_speaker,
+                        "start": current_words[0]["start"],
+                        "end": current_words[-1]["end"],
+                        "text": " ".join([word["word"] for word in current_words]),
+                        "words": [word["raw_obj"] for word in current_words]
+                    })
+                    seg_id += 1
+                current_speaker = best_speaker
+                current_words = []
+                
+            current_words.append({
+                "word": w_text,
+                "start": w_start,
+                "end": w_end,
+                "raw_obj": w
+            })
+
+    # Flush final remaining words
+    if current_words:
+        aligned_turns.append({
+            "id": seg_id,
+            "speaker": current_speaker,
+            "start": current_words[0]["start"],
+            "end": current_words[-1]["end"],
+            "text": " ".join([word["word"] for word in current_words]),
+            "words": [word["raw_obj"] for word in current_words]
+        })
+
+    return aligned_turns
 
 
 def get_role_assignment_from_llm(
@@ -507,6 +612,298 @@ def assign_speaker_roles(
     )
 
     return role_map
+
+
+def find_nearest_speaker(
+    timestamp: float, 
+    diarization_segments: list[DiarizationSegment]
+) -> Optional[tuple[str, float]]:
+    """
+    Finds the nearest diarization segment to the given timestamp.
+    Returns tuple of (speaker_id, distance_in_seconds) or None.
+    """
+    if not diarization_segments:
+        return None
+        
+    min_dist = float('inf')
+    nearest_speaker = None
+    
+    for seg in diarization_segments:
+        if seg.start <= timestamp <= seg.end:
+            dist = 0.0
+        elif timestamp < seg.start:
+            dist = seg.start - timestamp
+        else:
+            dist = timestamp - seg.end
+            
+        if dist < min_dist:
+            min_dist = dist
+            nearest_speaker = seg.speaker
+            
+    if nearest_speaker is not None:
+        return (nearest_speaker, min_dist)
+    return None
+
+
+def clone_segment(seg, start, end, text, speaker, role, words, seg_id):
+    if isinstance(seg, dict):
+        return {
+            **seg,
+            "id": seg_id,
+            "start": start,
+            "end": end,
+            "text": text,
+            "speaker": speaker,
+            "role": role,
+            "words": words
+        }
+    else:
+        # Polymorphic copy for Pydantic models or custom objects
+        try:
+            if hasattr(seg, "model_copy"):
+                new_seg = seg.model_copy(update={
+                    "id": seg_id,
+                    "start": start,
+                    "end": end,
+                    "text": text,
+                    "speaker": speaker,
+                    "role": role,
+                    "words": words
+                })
+                # Set attribute just to be safe if they are not fields
+                setattr(new_seg, "speaker", speaker)
+                setattr(new_seg, "role", role)
+                return new_seg
+            elif hasattr(seg, "copy"):
+                new_seg = seg.copy(update={
+                    "id": seg_id,
+                    "start": start,
+                    "end": end,
+                    "text": text,
+                    "speaker": speaker,
+                    "role": role,
+                    "words": words
+                })
+                setattr(new_seg, "speaker", speaker)
+                setattr(new_seg, "role", role)
+                return new_seg
+        except Exception:
+            pass
+            
+        new_seg = copy.copy(seg)
+        setattr(new_seg, "id", seg_id)
+        setattr(new_seg, "start", start)
+        setattr(new_seg, "end", end)
+        setattr(new_seg, "text", text)
+        setattr(new_seg, "speaker", speaker)
+        setattr(new_seg, "role", role)
+        setattr(new_seg, "words", words)
+        return new_seg
+
+
+def assign_speakers_to_segments(
+    scored_segments: list,          # list of ScoredSegment
+    diarization_segments: list[DiarizationSegment],
+    role_map: dict[str, SpeakerRole],
+) -> list:
+    """
+    Assign speaker labels to Whisper transcript segments using PyAnnote diarization output.
+    Uses Word-Level Alignment to map every word to the active speaker at that millisecond,
+    splitting the segments at speaker transition boundaries.
+    Falls back to segment-level overlap/nearest speaker matching if word timestamps are missing.
+
+    Args:
+        scored_segments: Output from confidence_service
+        diarization_segments: Output from diarize_audio
+        role_map: Mapping from speaker ID to clinical role
+
+    Returns:
+        New or modified segments with speaker and role fields populated
+    """
+    if not diarization_segments:
+        logger.warning("No diarization segments — speaker labels unavailable")
+        for seg in scored_segments:
+            if isinstance(seg, dict):
+                seg["speaker"] = "UNKNOWN"
+                seg["role"] = SpeakerRole.UNKNOWN
+            else:
+                setattr(seg, "speaker", "UNKNOWN")
+                setattr(seg, "role", SpeakerRole.UNKNOWN)
+        return scored_segments
+
+    assigned_turns = []
+    seg_id = 0
+    assigned_count = 0
+    unknown_count = 0
+
+    for seg in scored_segments:
+        # Extract word timestamps if available
+        words = getattr(seg, "words", None)
+        if words is None and isinstance(seg, dict):
+            words = seg.get("words")
+
+        start = seg.get("start", 0.0) if isinstance(seg, dict) else getattr(seg, "start", 0.0)
+        end = seg.get("end", 0.0) if isinstance(seg, dict) else getattr(seg, "end", 0.0)
+        text = seg.get("text", "") if isinstance(seg, dict) else getattr(seg, "text", "")
+
+        # Fallback to segment-level matching if no words
+        if not words:
+            best_speaker = None
+            max_overlap = 0.0
+
+            # Calculate overlap duration with each diarization turn
+            for diar_seg in diarization_segments:
+                overlap_start = max(start, diar_seg.start)
+                overlap_end = min(end, diar_seg.end)
+                overlap = max(0.0, overlap_end - overlap_start)
+                
+                if overlap > max_overlap:
+                    max_overlap = overlap
+                    best_speaker = diar_seg.speaker
+
+            if best_speaker and max_overlap > 0.0:
+                role = role_map.get(best_speaker, SpeakerRole.UNKNOWN)
+                assigned_turns.append(clone_segment(seg, start, end, text, best_speaker, role, [], seg_id))
+                seg_id += 1
+                assigned_count += 1
+            else:
+                midpoint = (start + end) / 2
+                nearest = find_nearest_speaker(midpoint, diarization_segments)
+                if nearest and nearest[1] < 2.0:
+                    role = role_map.get(nearest[0], SpeakerRole.UNKNOWN)
+                    assigned_turns.append(clone_segment(seg, start, end, text, nearest[0], role, [], seg_id))
+                    assigned_count += 1
+                else:
+                    assigned_turns.append(clone_segment(seg, start, end, text, "UNKNOWN", SpeakerRole.UNKNOWN, [], seg_id))
+                    unknown_count += 1
+                seg_id += 1
+            continue
+
+        # Word-level alignment and grouping within this segment
+        # current_speaker = None initially
+        # First iteration: best_speaker != None → True
+        # but current_words is empty → no flush
+        # Just sets current_speaker to first word's speaker
+        current_speaker = None
+        current_words = []
+
+        for w in words:
+            w_start = w.get("start", 0.0) if isinstance(w, dict) else getattr(w, "start", 0.0)
+            w_end = w.get("end", 0.0) if isinstance(w, dict) else getattr(w, "end", 0.0)
+            w_text = w.get("word", "") if isinstance(w, dict) else getattr(w, "word", "")
+
+            # Guard against zero timestamps by interpolating from the previous word (Issue 2)
+            if w_start == 0.0 and w_end == 0.0 and len(current_words) > 0:
+                prev_end = current_words[-1]["end"]
+                w_start = prev_end
+                w_end = prev_end + 0.1
+                # Write back to original word dict or object
+                if isinstance(w, dict):
+                    w["start"] = w_start
+                    w["end"] = w_end
+                else:
+                    try:
+                        setattr(w, "start", w_start)
+                        setattr(w, "end", w_end)
+                    except Exception:
+                        pass
+
+            best_speaker = "UNKNOWN"
+            max_overlap = 0.0
+
+            # Calculate overlap for this word
+            for d_seg in diarization_segments:
+                overlap_start = max(w_start, d_seg.start)
+                overlap_end = min(w_end, d_seg.end)
+                overlap = max(0.0, overlap_end - overlap_start)
+                
+                if overlap > max_overlap:
+                    max_overlap = overlap
+                    best_speaker = d_seg.speaker
+
+            # Default to containing segment midpoint if zero overlap (e.g. silence)
+            if max_overlap == 0.0:
+                midpoint = (w_start + w_end) / 2
+                for d_seg in diarization_segments:
+                    if d_seg.start <= midpoint <= d_seg.end:
+                        best_speaker = d_seg.speaker
+                        break
+
+            # If speaker changes, package the current buffer (Issue 3)
+            if best_speaker != current_speaker:
+                if current_words and len(current_words) >= 2:
+                    # Flush complete buffer
+                    role = role_map.get(current_speaker, SpeakerRole.UNKNOWN)
+                    assigned_turns.append(clone_segment(
+                        seg, 
+                        current_words[0]["start"], 
+                        current_words[-1]["end"], 
+                        " ".join([word["word"] for word in current_words]),
+                        current_speaker,
+                        role,
+                        [word["raw_obj"] for word in current_words],
+                        seg_id
+                    ))
+                    seg_id += 1
+                    if current_speaker != "UNKNOWN":
+                        assigned_count += 1
+                    else:
+                        unknown_count += 1
+                    leftover = []
+                elif current_words:
+                    # Carry over single word to next speaker's buffer rather than creating a one-word segment
+                    leftover = current_words
+                else:
+                    leftover = []
+
+                current_speaker = best_speaker
+                current_words = leftover  # carry over orphaned words
+
+            current_words.append({
+                "word": w_text,
+                "start": w_start,
+                "end": w_end,
+                "raw_obj": w
+            })
+
+        # Flush any remaining words in buffer (Issue 3)
+        if current_words:
+            # We don't apply the >= 2 restriction to the final flush of the segment 
+            # to make sure we don't drop the last word if it happens to be orphaned.
+            role = role_map.get(current_speaker, SpeakerRole.UNKNOWN)
+            assigned_turns.append(clone_segment(
+                seg, 
+                current_words[0]["start"], 
+                current_words[-1]["end"], 
+                " ".join([word["word"] for word in current_words]),
+                current_speaker,
+                role,
+                [word["raw_obj"] for word in current_words],
+                seg_id
+            ))
+            seg_id += 1
+            if current_speaker != "UNKNOWN":
+                assigned_count += 1
+            else:
+                unknown_count += 1
+
+    # Log and sanity warning check (Issue 5)
+    logger.info(
+        f"Speaker assignment: {assigned_count} assigned, "
+        f"{unknown_count} unknown "
+        f"(Input: {len(scored_segments)} segments -> "
+        f"Output: {len(assigned_turns)} segments after splitting)"
+    )
+
+    if len(assigned_turns) > len(scored_segments) * 5:
+        logger.warning(
+            f"Segment count increased {len(assigned_turns) / len(scored_segments):.1f}x "
+            f"after speaker splitting — possible diarization fragmentation. "
+            f"Check audio quality."
+        )
+
+    return assigned_turns
+
     
     
     
