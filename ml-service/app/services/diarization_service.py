@@ -712,13 +712,7 @@ def assign_speakers_to_segments(
     splitting the segments at speaker transition boundaries.
     Falls back to segment-level overlap/nearest speaker matching if word timestamps are missing.
 
-    Args:
-        scored_segments: Output from confidence_service
-        diarization_segments: Output from diarize_audio
-        role_map: Mapping from speaker ID to clinical role
-
-    Returns:
-        New or modified segments with speaker and role fields populated
+    
     """
     if not diarization_segments:
         logger.warning("No diarization segments — speaker labels unavailable")
@@ -779,11 +773,6 @@ def assign_speakers_to_segments(
                 seg_id += 1
             continue
 
-        # Word-level alignment and grouping within this segment
-        # current_speaker = None initially
-        # First iteration: best_speaker != None → True
-        # but current_words is empty → no flush
-        # Just sets current_speaker to first word's speaker
         current_speaker = None
         current_words = []
 
@@ -792,12 +781,10 @@ def assign_speakers_to_segments(
             w_end = w.get("end", 0.0) if isinstance(w, dict) else getattr(w, "end", 0.0)
             w_text = w.get("word", "") if isinstance(w, dict) else getattr(w, "word", "")
 
-            # Guard against zero timestamps by interpolating from the previous word (Issue 2)
             if w_start == 0.0 and w_end == 0.0 and len(current_words) > 0:
                 prev_end = current_words[-1]["end"]
                 w_start = prev_end
                 w_end = prev_end + 0.1
-                # Write back to original word dict or object
                 if isinstance(w, dict):
                     w["start"] = w_start
                     w["end"] = w_end
@@ -811,7 +798,6 @@ def assign_speakers_to_segments(
             best_speaker = "UNKNOWN"
             max_overlap = 0.0
 
-            # Calculate overlap for this word
             for d_seg in diarization_segments:
                 overlap_start = max(w_start, d_seg.start)
                 overlap_end = min(w_end, d_seg.end)
@@ -821,7 +807,6 @@ def assign_speakers_to_segments(
                     max_overlap = overlap
                     best_speaker = d_seg.speaker
 
-            # Default to containing segment midpoint if zero overlap (e.g. silence)
             if max_overlap == 0.0:
                 midpoint = (w_start + w_end) / 2
                 for d_seg in diarization_segments:
@@ -829,10 +814,8 @@ def assign_speakers_to_segments(
                         best_speaker = d_seg.speaker
                         break
 
-            # If speaker changes, package the current buffer (Issue 3)
             if best_speaker != current_speaker:
                 if current_words and len(current_words) >= 2:
-                    # Flush complete buffer
                     role = role_map.get(current_speaker, SpeakerRole.UNKNOWN)
                     assigned_turns.append(clone_segment(
                         seg, 
@@ -851,13 +834,13 @@ def assign_speakers_to_segments(
                         unknown_count += 1
                     leftover = []
                 elif current_words:
-                    # Carry over single word to next speaker's buffer rather than creating a one-word segment
+                    
                     leftover = current_words
                 else:
                     leftover = []
 
                 current_speaker = best_speaker
-                current_words = leftover  # carry over orphaned words
+                current_words = leftover 
 
             current_words.append({
                 "word": w_text,
@@ -866,10 +849,7 @@ def assign_speakers_to_segments(
                 "raw_obj": w
             })
 
-        # Flush any remaining words in buffer (Issue 3)
         if current_words:
-            # We don't apply the >= 2 restriction to the final flush of the segment 
-            # to make sure we don't drop the last word if it happens to be orphaned.
             role = role_map.get(current_speaker, SpeakerRole.UNKNOWN)
             assigned_turns.append(clone_segment(
                 seg, 
@@ -887,7 +867,6 @@ def assign_speakers_to_segments(
             else:
                 unknown_count += 1
 
-    # Log and sanity warning check (Issue 5)
     logger.info(
         f"Speaker assignment: {assigned_count} assigned, "
         f"{unknown_count} unknown "
