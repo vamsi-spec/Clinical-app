@@ -903,11 +903,6 @@ def assign_speakers_to_segments(
         )
 
     return assigned_turns
-
-    
-    
-    
-
     
     
 def get_diarization_stats(
