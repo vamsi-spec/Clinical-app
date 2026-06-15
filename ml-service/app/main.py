@@ -76,30 +76,94 @@ async def lifespan(app: FastAPI):
     logger.info(f"Environment: {settings.environment}")
     logger.info(f"Whisper model size: {settings.whisper_model_size}")
     logger.info(f"Ollama model: {settings.ollama_model}")
-    
+
+    loop = asyncio.get_event_loop()
+
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        logger.info("Loading whisper model...")
+        try:
+            await loop.run_in_executor(executor,_load_whisper)
+        except Exception as e:
+            logger.error(f"FATAL: Whisper failed to load — {e}. "
+            "ML service cannot function without Whisper.")
 
 
-    logger.info("ML service ready")
+        logger.info("Loading PyAnnote and Wav2Vec2 in parallel...")
+        diarization_future = loop.run_in_executor(
+            executor, _load_diarization
+        )
+        wav2vec2_future = loop.run_in_executor(
+            executor, _load_wav2vec2
+        )
+
+        await asyncio.gather(
+            diarization_future,
+            wav2vec2_future,
+            return_exceptions=True,
+        )
+
+    if model_state["whisper"] is not None:
+        model_state["models_loaded"] = True
+        logger.info(" ML Service ready — Whisper loaded")
+    else:
+        logger.error(
+            " ML Service degraded — Whisper not loaded. "
+            "Transcription requests will fail."
+        )
+
+    if model_state["loading_errors"]:
+        logger.warning(
+            f"Loading errors: {model_state['loading_errors']}"
+        )
+
+    logger.info(
+        f"Model status: "
+        f"Whisper={'Done' if model_state['whisper'] else 'Failed'} "
+        f"Diarization={'Done' if model_state['diarization'] else 'Failed'} "
+        f"Wav2Vec2={'Done' if model_state['wav2vec2_processor'] else 'Failed'}"
+    )
 
     yield
 
-    logger.info("ML Service shutting down...")
+    logger.info("ML service shutting down...")
+
+    import glob
+    temp_files = glob.glob("temp/audio-*")
+    for f in temp_files:
+        try:
+            import os
+            os.unlink(f)
+        except Exception:
+            pass
+    if temp_files:
+        logger.info(f"Cleaned {len(temp_files)} temp files on shutdown")
 
 
-app = FastAPI(
-    title="Clinical Note Intelligence - ML Service",
-    description="Handles transcription,NER SOAP generation billing codes ,and drug interaction detection",
+app = FastAPI(title="Clinical Note Intelligence — ML Service",
+    description=(
+        "Handles transcription, speaker diarization, NER, "
+        "SOAP generation, billing codes, and drug interaction detection"
+    ),
     version="1.0.0",
-    lifespan=lifespan
-)
+    lifespan=lifespan,)
+
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5000"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:5000",
+        "http://backend:5000",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+from app.routers import transcription
+app.include_router(transcription.router,prefix="/transcribe",tags=["Transcription"])
+
 
 
 @app.get("/health")
