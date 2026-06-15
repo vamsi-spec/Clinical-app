@@ -9,7 +9,7 @@ torchaudio==2.3.0
 transformers==4.41.0
 # openai-whisper is installed separately in the Dockerfile with --no-build-isolation to avoid setuptools compatibility issues.
 # openai-whisper==20231117
-
+aiofiles==23.2.1
 
 # AUDIO PROCESSING
 
