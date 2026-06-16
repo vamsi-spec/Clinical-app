@@ -80,4 +80,48 @@ def get_entity_confidence(entity_start:int, entity_end:int, confidence_map:dict)
             return confidence
     return 1.0
         
+# TEXT PREPROCESSING
+# NER works better on clean, normalized text
+def processing_for_ner(transcript: str) -> str:
+    text = re.sub(r'^(DOCTOR|PATIENT|FAMILY|UNKNOWN):\s*', '', transcript, flags=re.MULTILINE)
+
+    text = re.sub(r'\s+',' ',text).strip()
+
+    expansions = {
+        r'\bBP\b': 'blood pressure',
+        r'\bHR\b': 'heart rate',
+        r'\bRR\b': 'respiratory rate',
+        r'\bSOB\b': 'shortness of breath',
+        r'\bCP\b': 'chest pain',
+        r'\bN/V\b': 'nausea vomiting',
+        r'\bDOE\b': 'dyspnea on exertion',
+        r'\bh/o\b': 'history of',
+        r'\bc/o\b': 'complains of',
+        r'\bk/c/o\b': 'known case of',
+        r'\bDM\b': 'diabetes mellitus',
+        r'\bHTN\b': 'hypertension',
+        r'\bCAD\b': 'coronary artery disease',
+        r'\bCKD\b': 'chronic kidney disease',
+    }
+
+    for pattern, expansion in expansions.items():
+        text = re.sub(pattern, expansion, text, flags=re.IGNORECASE)
+
+    return text
+
+
+
+def deduplicate_entities(entities: list[NEREntity]) -> list[NEREntity]:
+    seen_texts = {}
+    for entity in entities:
+        normalized = entity.text.lower().strip()
+        if normalized not in seen_texts:
+            seen_texts[normalized] = entity
+        else:
+            if entity.confidence > seen_texts[normalized].confidence:
+                seen_texts[normalized] = entity
     
+    return list(seen_texts.values())
+
+
+
