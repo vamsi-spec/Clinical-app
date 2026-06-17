@@ -24,6 +24,7 @@ spacy==3.7.4
 scispacy==0.5.4
 negspacy==1.0.4
 sentence-transformers==2.7.0
+scispacy[umls]==0.5.4
 
 # UTILITIES
 rapidfuzz==3.9.1
