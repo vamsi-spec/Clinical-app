@@ -867,3 +867,181 @@ def enrich_medication_with_dosage(medications: list[NEREntity], transcript: str)
         ))
 
     return enriched
+
+
+#uncertain entity flagging 
+#entities from low-confidence transcript segments are less reliable - we flag them differently for frontend
+
+
+UNCERTAINTY_THRESHOLD = 0.5
+
+def flag_uncertain_entities(entities: list[NEREntity]) -> list[NEREntity]:
+    flagged = []
+    for entity in entities:
+        if entity.confidence < UNCERTAINTY_THRESHOLD:
+            entity.label = f"{entity.label}_UNCERTAIN"
+        flagged.append(entity)
+    return flagged
+
+
+#MAIN NER function
+#called by intelligence_pipeline.py
+
+
+def extract_clinical_entities(transcript: str,segments: list[EnrichedSegment],nlp_bc5,nlp_sci,specialty: str = "general") -> NEResponse:
+    """
+    steps:
+    1.preprocess transcript(expand abbreavations)
+    2.build confidence map form enriched segments
+    3.run bc5cdr model -> medications + diseases
+    4.Run sci_md model -> additional entities
+    5.apply negation filter 
+    6.enrich medications with dosage information
+    7.deduplicate enties
+    8.falg enties with low confidence
+    9.seperate diesease into sym vs diag
+    """
+
+    if not transcript or not transcript.strip():
+        logger.warning("Empty transcript - returning empty NER response")
+        return NEResponse(visit_id="",medications=[],symptoms=[],diagnoses=[])
+
+    logger.info(f"Starting NER for visit_id: {visit_id}")
+    
+    #step 1 preprocess
+    processed_text = preprocess_for_ner(transcript)
+
+    #step 2 Build confidence map
+    confidence_map = build_confidence_map(segments,processed_text)
+
+    #step 3 bc5cdr extraction 
+    medications_raw,diseases_raw = extract_entities_bc5cdr(
+        processed_text,
+        nlp_bc5,
+        confidence_map,segments
+    )
+
+    logger.info(
+        f"bc5cdr found: {len(medications_raw)} medications, "
+        f"{len(diseases_raw)} disease entities"
+    )
+
+    #step 4 sci_md for additional entities
+    existing_texts = {
+        e.text.lower() for e in medications_raw + diseases_raw
+    }
+
+    additional_entities = extract_entities_sci_md(
+        processed_text,
+        nlp_sci,
+        confidence_map,
+        existing_texts,
+    )
+
+    logger.info(
+        f"sci_md added {len(additional_entities)} additional entities"
+    )
+
+    # STEP 5: Apply negation filter
+    # Remove entities that were negated
+    # "Patient denies chest pain" → chest pain removed
+    
+    def filter_negated(entities: list[NEREntity]) -> list[NEREntity]:
+        active  = [e for e in entities if not e.negated]
+        negated_count = len(entities) - len(active)
+        if negated_count > 0:
+            negated_texts = [e.text for e in entities if e.negated]
+            logger.info(
+                f"Filtered out {negated_count} negated entities:"
+                f"{negated_texts}"
+            )
+            return active
+
+    medications_active = filter_negated(medications_raw)
+    diseases_active = filter_negated(diseases_raw)
+    additional_active = filter_negated(additional_entities)
+
+    #STEP 6: Enrich medications with dosage
+    medications_enriched = enrich_medication_with_dosage(medications_active,processed_text)
+
+    #step 7 seperate sym from diag
+    symptoms = [e for e in diseases_active if e.label == "SYMPTOM"]
+    diagnoses = [e for e in diseases_active if e.label == "DIAGNOSIS"]
+
+    symptoms.extend(additional_active)
+    #depuplicate
+    medications_deduped = deduplicate_entities(medications_enriched)
+    symptoms_deduped = deduplicate_entities(symptoms)
+    diagnoses_deduped = deduplicate_entities(diagnoses)
+
+
+    # flag uncertain 
+    medications_final = flag_uncertain_entities(medications_deduped)
+    symptoms_final = flag_uncertain_entities(symptoms_deduped)
+    diagnoses_final = flag_uncertain_entities(diagnoses_deduped)
+
+    logger.info(f"NER complete: {len(medications_final)} medications, {len(symptoms_final)} symptoms, {len(diagnoses_final)} diagnoses")
+
+    return NEResponse(
+        visit_id=visit_id,
+        medications=medications_final,
+        symptoms=symptoms_final,
+        diagnoses=diagnoses_final
+    )
+
+    return NERResponse(
+        visit_id="",  # set by caller
+        medications=medications_final,
+        symptoms=symptoms_final,
+        diagnoses=diagnoses_final,
+    )
+
+
+#format Transcript for builder 
+# from enriched segments for the LLM Format: "DOCTOR: text .PATIENT: text\n..."
+
+def build_speaker_trancript(segments: list[EnrichedSegment]) -> str:
+    lines = []
+    current_speaker = None
+    current_text = []
+
+    for seg in segments:
+        speaker = seg.role.value if hasattr(seg.role, 'value') else str(seg.role)
+        text = seg.text.strip()
+
+        if not text:
+            continue
+
+        if speaker == current_speaker:
+            current_text.append(text)
+        else:
+            if current_speaker and current_text:
+                lines.append(f"{current_speaker}: {' '.join(current_text)}")
+            current_speaker = speaker
+            current_text = [text]
+
+    # Flush last speaker
+    if current_speaker and current_text:
+        lines.append(f"{current_speaker}: {' '.join(current_text)}")
+
+    return "\n".join(lines)
+
+def get_ner_stats(response: NERResponse) -> dict:
+    uncertain_meds = [
+        m for m in response.medications
+        if "UNCERTAIN" in m.label
+    ]
+
+    return {
+        "total_entities": (
+            len(response.medications) +
+            len(response.symptoms) +
+            len(response.diagnoses)
+        ),
+        "medications": len(response.medications),
+        "symptoms": len(response.symptoms),
+        "diagnoses": len(response.diagnoses),
+        "uncertain_entities": len(uncertain_meds),
+        "has_medications": len(response.medications) > 0,
+        "has_diagnoses": len(response.diagnoses) > 0,
+    }
