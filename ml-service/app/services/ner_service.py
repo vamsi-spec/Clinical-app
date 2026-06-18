@@ -23,6 +23,9 @@ def load_ner_models() -> tuple:
 
         logger.info("Loading en_ner_bc5dr_md...")
         nlp_bc5 = spacy.load("en_ner_bc5cdr_md")
+        nlp_bc5 = add_negation_detector(nlp_bc5)
+
+        nlp_bc5 = load_entity_linker(nlp_bc5)
         logger.info("en_ner_bc5cdr_md loaded")
     except Exception as e:
         logger.error(f"Failed to load en_ner_bc5dr_md: {e}")
@@ -33,6 +36,7 @@ def load_ner_models() -> tuple:
         
         logger.info("Loading en_core_sci_md...")
         nlp_sci = spacy.load("en_core_sci_md")
+        nlp_sci = add_negation_detector(nlp_sci)
         logger.info("en_core_sci_md loaded")
 
     except Exception as e:
@@ -694,5 +698,174 @@ def classifty_disease_entity(entity_text: str,spacy_entity=None,sentence_context
     return result
     
 
-        
-        
+
+def find_entity_speaker(entity_start: int,segments: list[EnrichedSegment],) -> Optional[str]:
+    char_offset = 0
+    for seg in segments:
+        seg_end = char_offset + len(seg.text)
+        if char_offset <= entity_start < seg_end:
+            return seg.role.value if hasattr(seg.role,'value') else str(seg.role)
+        char_offset = seg_end +
+    return None
+
+
+
+def extract_entities_bc5cdr(text: str,nlp_bc5,confidence_map: dict,segments: list,embedder_cache: Optional[dict] = None,use_llm: bool = True) -> tuple[list[NEREntity],list[NEREntity]]:
+    medications = []
+    diseases = []
+    
+    if nlp_bc5 is None:
+        return [] ,[]
+    
+    try:
+        doc = nlp_bc5(text)
+
+        for ent in doc.ents:
+            is_negated = False
+            if hasattr(ent._,'negex'):
+                is_negated = ent._.negex
+
+            entity_confidence = get_entity_confidence(
+                ent.start_char,
+                ent.end_char,
+                confidence_map
+            )
+            speaker = find_entity_speaker(ent.start_char,segments)
+
+            sentence_context = extract_entity_context(ent.text,text,ent.start_char)
+
+            entity = NEREntity(text=ent.text,label=ent.label_,start=ent.start_char,end=ent.start_char,end=ent.end_char,negated=is_negated,confidence=round(entity_confidence,3))
+
+            if ent.label_ == "CHEMICAL":
+                entity.label = "MEDICATION"
+                medications.append(entity)
+
+            elif ent.label_ == "DISEASE":
+                classification = classify_disease_entity(
+                    entity_text=ent.text,
+                    spacy_entity=ent,               
+                    sentence_context=sentence_context,  
+                    speaker_role=speaker,               
+                    full_transcript=text,
+                    entity_start=ent.start_char,
+                    embedder_cache=embedder_cache,
+                    use_llm=use_llm,
+                )
+                if classification == "IGNORE":
+                    continue 
+                elif classification == "FAMILY_HISTORY":
+                    entity.label = "FAMILY_HISTORY"
+                    diseases.append(entity)
+                elif classification == "NEGATED_CONTEXT":
+                    entity.negated = True
+                    entity.label = "SYMPTOM"
+                    diseases.append(entity)
+                else:
+                    entity.label = classification 
+                    diseases.append(entity)
+    except Exception as e:
+        logger.error(f"Error processing text with bc5 model: {e}")
+    return medications,diseases
+
+
+
+def extract_entities_sci_md(text: str,nlp_sci,confidence_map: dict,existing_texts: set) -> list[NEREntity]:
+    #Return entities not found by bc5dcr
+
+    additional = []
+    if nlp_sci is None:
+        return additional
+
+    try:
+        doc = nlp_sci(text)
+
+        for ent in doc.ents:
+            if ent.text_lower() in existing_texts:
+                continue
+                
+            if len(ent.text.strip()) < 3:
+                continue
+            
+            is_negated = False
+            if hasattr(ent._,'negex'):
+                is_negated = ent._.negex
+
+            entity_confidence = get_entity_confidence(
+                ent.start_char,
+                ent.end_char,
+                confidence_map
+            )
+            
+            additional.append(NEREntity(
+                text = ent.text,
+                label = "SYMPTOM",
+                start = ent.start_char,
+                end = ent.end_char,
+                negated = is_negated,
+                confidence = round(entity_confidence,3),
+            ))
+
+    except Exception as e:
+        logger.error(f"sci_md extraction failed: {e}")
+
+    return additional
+
+
+#Dosage extractor 
+#bc5cdr extracts "Metformin" but misses "500mg"We use regex to find dosage patterns 
+
+DOSAGE_PATTERN = re.compile(
+    r'\b(\d+(?:\.\d+)?)\s*'
+    r'(mg|mcg|g|ml|units?|iu|mmol|mEq|%)'
+    r'(?:\s+(?:twice|once|three times|'
+    r'bd|tds|od|tid|bid|qid|hs|prn|daily|weekly)'
+    r')?',
+    re.IGNORECASE
+)
+
+
+FREQUENCY_PATTERN = re.compile(
+    r'\b(once daily|twice daily|three times daily|'
+    r'bd|tds|od|tid|bid|qid|hs|prn|every \d+ hours?|'
+    r'at bedtime|with meals|before meals|after meals)\b',
+    re.IGNORECASE
+)
+
+
+
+def enrich_medication_with_dosage(medications: list[NEREntity],transcript: str) -> list[NEREntity]:
+    """
+    Look for dosage patterns near each medication entity.
+    """
+
+    enriched = []
+
+    for med in medications:
+        window_start = med.end
+        window_end = min(len(transcript),med.end + 60)
+        window = transcript[window_start:window_end]
+
+        dosage_match = DOSAGE_PATTERN.search(window)
+        frequency_match = FREQUENCY_PATTERN.search(window)
+
+        enriched_text = med.text
+
+        if dosage_match:
+            enriched_text += f" {dosage_match.group(0).strip()}"
+
+        if frequency_match and frequency_match.start() < 30:
+            freq = frequency_match.group(0)
+            if freq not in enriched_text:
+                enriched_text += f" {freq}"
+
+        enriched.append(NEREntity(
+            text=enriched_text.strip(),
+            label="MEDICATION",
+            start=med.start,
+            end=med.end,
+            negated=med.negated,
+            confidence=med.confidence,
+        ))
+
+    return enriched
+
