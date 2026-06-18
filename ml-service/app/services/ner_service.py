@@ -833,39 +833,37 @@ FREQUENCY_PATTERN = re.compile(
 
 
 
-def enrich_medication_with_dosage(medications: list[NEREntity],transcript: str) -> list[NEREntity]:
-    """
-    Look for dosage patterns near each medication entity.
-    """
-
+def enrich_medication_with_dosage(medications: list[NEREntity], transcript: str) -> list[NEREntity]:
     enriched = []
 
     for med in medications:
         window_start = med.end
-        window_end = min(len(transcript),med.end + 60)
+        window_end = min(len(transcript), med.end + 60)
         window = transcript[window_start:window_end]
 
         dosage_match = DOSAGE_PATTERN.search(window)
         frequency_match = FREQUENCY_PATTERN.search(window)
 
         enriched_text = med.text
+        final_end = med.end
 
         if dosage_match:
             enriched_text += f" {dosage_match.group(0).strip()}"
+            final_end = med.end + dosage_match.end()
 
         if frequency_match and frequency_match.start() < 30:
             freq = frequency_match.group(0)
             if freq not in enriched_text:
                 enriched_text += f" {freq}"
+                final_end = max(final_end, med.end + frequency_match.end())
 
         enriched.append(NEREntity(
             text=enriched_text.strip(),
             label="MEDICATION",
             start=med.start,
-            end=med.end,
+            end=final_end,  
             negated=med.negated,
             confidence=med.confidence,
         ))
 
     return enriched
-
