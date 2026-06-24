@@ -137,7 +137,7 @@ export const login = async (req, res) => {
 
         const isPasswordMatched = await bcrypt.compare(password, user.passwordHash);
 
-        if (!isPasswordMatched) {
+        if (!isPasswordMatched){
             logger.warn(`Failed login attempt for: ${email}`)
             return errorResponse(res, 'Invalid email or password.', 401)
         }
