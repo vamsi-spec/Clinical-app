@@ -3,6 +3,8 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from app.config import settings
+
+
 import logging 
 import asyncio
 import sys
@@ -162,7 +164,11 @@ app.add_middleware(
 
 
 from app.routers import transcription
+from app.routers import soap
 app.include_router(transcription.router,prefix="/transcribe",tags=["Transcription"])
+
+app.include_router(soap.router, prefix="/soap", tags=["SOAP Generation"])
+
 
 
 
