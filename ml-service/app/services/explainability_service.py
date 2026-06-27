@@ -381,3 +381,29 @@ def split_into_sentences(text: str, min_length: int = 10) -> list[str]:
         sentences = [s.strip() for s in raw if len(s.strip()) > min_length]
         return sentences if sentences else [text.strip()]
 
+
+#Batch segment embedder
+#Pre-computes embeddings for all segments once reuse tem for every SOAP note.
+# Without batching: O(n_sentences × n_segments) encodings
+# With batching: O(n_segments) encodings + O(n_sentences) comparisons
+
+
+def batch_encode_segments(segments: list[EnrichedSegment],embedder) -> Optional[any]:
+    if embedder is None or not segments:
+        return None
+    try:
+        import torch
+        texts = [seg.text for seg in segments]
+        logger.info(f"Batch encoding {len(texts)} segments")
+        start = time.time()
+        embeddings = embedder.encode(texts,convert_to_tensor=True,batch_size=32)
+        elapsed = round(time.time() - start,2)
+        logger.info(f"Batch encoding completed in {elapsed} seconds")
+        return embeddings
+
+    except Exception as e:
+        logger.warning(f"Batch encoding failed: {e} - Falling back to on-the-fly encoding")
+        return None
+        
+        
+
