@@ -339,21 +339,45 @@ class ExplainabilityService:
         ]
 
 
-MEDICAL_ABBREVIATIONS = {
-    r'\bb\.i\.d\.',    # twice daily
-    r'\bt\.i\.d\.',    # three times daily
-    r'\bq\.i\.d\.',    # four times daily
-    r'\bq\.d\.',       # once daily
-    r'\bp\.r\.n\.',    # as needed
-    r'\bh\.s\.',       # at bedtime
-    r'\bDr\.',         # Doctor
-    r'\bMr\.',         # Mister
-    r'\bMrs\.',        # Missus
-    r'\bMs\.',         # Miss
-    r'\bvs\.',         # versus
-    r'\betc\.',        # et cetera
-    r'\be\.g\.',       # for example
-    r'\bi\.e\.',       # that is
-    r'\bNo\.',         # Number
-    r'\bFig\.',        # Figure
-}
+
+def split_into_sentences(text: str, min_length: int = 10) -> list[str]:
+    """
+    Split clinical text into sentences using pySBD.
+
+    pySBD (Python Sentence Boundary Disambiguation) handles:
+    - Medical abbreviations (b.i.d., p.r.n., Dr., etc.)
+    - Decimal numbers (2.5mg, 130/85)
+    - Ellipses, URLs, and other edge cases
+
+    Falls back to basic regex splitting if pySBD is not installed.
+
+    Args:
+        text: Clinical text to split
+        min_length: Minimum character length for a sentence (filters noise)
+
+    Returns:
+        List of sentences
+    """
+    if not text or not text.strip():
+        return []
+
+    try:
+        import pysbd
+
+        segmenter = pysbd.Segmenter(language="en", clean=False)
+        sentences = [
+            s.strip() for s in segmenter.segment(text)
+            if len(s.strip()) > min_length
+        ]
+        return sentences if sentences else [text.strip()]
+
+    except ImportError:
+        logger.warning(
+            "pySBD not installed — falling back to basic regex splitting. "
+            "Install with: pip install pysbd"
+        )
+        # Fallback: simple split on sentence-ending punctuation + space + capital
+        raw = re.split(r'(?<=[.!?])\s+(?=[A-Z])', text)
+        sentences = [s.strip() for s in raw if len(s.strip()) > min_length]
+        return sentences if sentences else [text.strip()]
+
