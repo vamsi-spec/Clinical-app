@@ -505,3 +505,98 @@ def _empty_source() -> dict:
         "source_role":     None,
         "match_confidence": 0.0,
     }
+
+
+#Build explainable SOAP
+#main function maps all sentence in all
+
+def build_explainable_soap(soap_note: dict,segments: list[EnrichedSegment],embedder) -> dict:
+    """
+    Build explainable SOAP note with source timestamp mapping.
+
+    For each sentence in each SOAP section:
+    1. Split section into sentences
+    2. Find best matching transcript segment
+    3. Store sentence + source metadata
+
+    The result is stored in SOAPNote.explainableNote as JSON.
+    React frontend reads source_start to jump audio player.
+    """
+
+    start_time = time.time()
+
+    if not segments:
+        logger.warning("No segments provided for explainable SOAP")
+        return _build_unexplained_soap(soap_note)
+
+    segment_embedding = batch_encode_segments(segments,embedder)
+
+    explainable = {}
+    total_sentences = 0
+    low_confidence_sentences = 0
+
+    for section in ["subjective","objective","assessment","plan"]:
+        content = soap_note.get(section,"")
+        if not content or len(content.strip()) < 10:
+            explainable[section] = []
+            continue
+
+        sentences = split_into_sentences(content)
+        section_result = []
+
+        for sentence in sentences:
+            if not sentence.strip():
+                continue
+
+            source = find_best_segment(soap_sentence=sentence,section=section,segments=segments,embedder=embedder,segment_embeddings=segment_embeddings)
+            
+            total_sentences += 1
+            if source["match_confidence"] < 0.3:
+                low_confidence_sentences += 1
+
+            section_result.append({
+                "text":             sentence,
+                "source_start":     source["source_start"],
+                "source_end":       source["source_end"],
+                "source_text":      source["source_text"],
+                "source_speaker":   source["source_speaker"],
+                "source_role":      source["source_role"],
+                "match_confidence": source["match_confidence"],
+            })
+
+        explainable[section] = section_result
+
+    elapsed = round(time.time() - start_time,2)
+    logger.info(
+        f"Explainability mapping complete: {elapsed}s, "
+        f"{total_sentences} sentences, "
+        f"{low_confidence_sentences} low confidence"
+    )
+
+    return explainable
+
+def _build_unexplained_soap(soap_note: dict) -> dict:
+    """
+    Build explainable structure with no source links.
+    Used when no segments are available.
+    """
+    unexplained = {}
+    for section in ["subjective", "objective", "assessment", "plan"]:
+        content = soap_note.get(section, "")
+        sentences = split_into_sentences(content) if content else []
+        unexplained[section] = [
+            {
+                "text":             s,
+                "source_start":     None,
+                "source_end":       None,
+                "source_text":      None,
+                "source_speaker":   None,
+                "source_role":      None,
+                "match_confidence": 0.0,
+            }
+            for s in sentences
+        ]
+    return unexplained
+
+
+    
