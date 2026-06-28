@@ -1,4 +1,5 @@
 import re
+import time
 import logging
 from typing import Optional
 from dataclasses import dataclass, field
@@ -382,28 +383,125 @@ def split_into_sentences(text: str, min_length: int = 10) -> list[str]:
         return sentences if sentences else [text.strip()]
 
 
-#Batch segment embedder
-#Pre-computes embeddings for all segments once reuse tem for every SOAP note.
+# ──────────────────────────────────────────────────────────────
+# Standalone Helpers (functional API)
+# ──────────────────────────────────────────────────────────────
+
+# Speaker preference weight for standalone function
+SPEAKER_PREFERENCE_WEIGHT = 0.10
+
+
+def _empty_source() -> dict:
+    """Return an empty source dict when no segment match is found."""
+    return {
+        "source_start": None,
+        "source_end": None,
+        "source_text": None,
+        "source_speaker": None,
+        "source_role": None,
+        "match_confidence": 0.0,
+    }
+
+
+# Batch segment embedder
+# Pre-computes embeddings for all segments once, reuse them for every SOAP note.
 # Without batching: O(n_sentences × n_segments) encodings
 # With batching: O(n_segments) encodings + O(n_sentences) comparisons
 
 
-def batch_encode_segments(segments: list[EnrichedSegment],embedder) -> Optional[any]:
+def batch_encode_segments(segments: list[EnrichedSegment], embedder) -> Optional[any]:
+    """Batch-encode all segment texts into embeddings. Call once per visit."""
     if embedder is None or not segments:
         return None
     try:
-        import torch
         texts = [seg.text for seg in segments]
         logger.info(f"Batch encoding {len(texts)} segments")
         start = time.time()
-        embeddings = embedder.encode(texts,convert_to_tensor=True,batch_size=32)
-        elapsed = round(time.time() - start,2)
-        logger.info(f"Batch encoding completed in {elapsed} seconds")
+        embeddings = embedder.encode(texts, convert_to_tensor=True, batch_size=32)
+        elapsed = round(time.time() - start, 2)
+        logger.info(f"Batch encoding completed in {elapsed}s")
         return embeddings
 
     except Exception as e:
-        logger.warning(f"Batch encoding failed: {e} - Falling back to on-the-fly encoding")
+        logger.warning(f"Batch encoding failed: {e} — falling back to on-the-fly encoding")
         return None
-        
-        
 
+
+def find_best_segment(
+    soap_sentence: str,
+    section: str,
+    segments: list[EnrichedSegment],
+    embedder,
+    segment_embeddings,
+) -> dict:
+    """
+    Find the best matching transcript segment for a SOAP sentence.
+
+    Uses all 3 scoring layers: keyword overlap, semantic similarity,
+    and speaker preference bonus.
+
+    Args:
+        soap_sentence: A single sentence from the SOAP note
+        section: SOAP section name ("subjective", "objective", etc.)
+        segments: List of enriched transcript segments
+        embedder: Sentence transformer model (or None)
+        segment_embeddings: Pre-computed embeddings from batch_encode_segments
+
+    Returns:
+        Dict with source_start, source_end, source_text, source_speaker,
+        source_role, and match_confidence
+    """
+    if not segments:
+        return _empty_source()
+
+    preferred_role = SECTION_SPEAKER_PREFERENCE.get(section, SpeakerRole.UNKNOWN)
+
+    # Encode SOAP sentence once for all comparisons
+    soap_emb = None
+    if embedder is not None:
+        try:
+            soap_emb = embedder.encode(soap_sentence, convert_to_tensor=True)
+        except Exception as e:
+            logger.warning(f"Failed to encode SOAP sentence: {e}")
+
+    best_score = -1.0
+    best_segment = None
+
+    for idx, seg in enumerate(segments):
+        # Layer 1: keyword overlap
+        kw_score = keyword_overlap_score(soap_sentence, seg.text)
+
+        # Layer 2: semantic similarity (using pre-computed embeddings)
+        seg_emb = segment_embeddings[idx] if segment_embeddings is not None else None
+        sem_score = semantic_similarity_score(soap_emb, seg_emb)
+
+        # Layer 3: speaker preference bonus
+        speaker_bonus = SPEAKER_PREFERENCE_WEIGHT if seg.role == preferred_role else 0.0
+
+        score = combined_match_score(kw_score, sem_score, speaker_bonus)
+
+        if score > best_score:
+            best_score = score
+            best_segment = seg
+
+    if best_segment is None:
+        return _empty_source()
+
+    return {
+        "source_start": best_segment.start,
+        "source_end": best_segment.end,
+        "source_text": best_segment.text,
+        "source_speaker": best_segment.speaker,
+        "source_role": best_segment.role.value,
+        "match_confidence": round(best_score, 3),
+    }
+def _empty_source() -> dict:
+    """Return empty source when no match found."""
+    return {
+        "source_start":    None,
+        "source_end":      None,
+        "source_text":     None,
+        "source_speaker":  None,
+        "source_role":     None,
+        "match_confidence": 0.0,
+    }
