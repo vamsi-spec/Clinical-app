@@ -598,5 +598,56 @@ def _build_unexplained_soap(soap_note: dict) -> dict:
         ]
     return unexplained
 
+#Audit Hash generator
 
+def generate_audit_hash(soap_note: dict,visit_id: str,finalized_at: str) -> str:
+    canonical = json.dumps(soap_note,sort_keys=True,ensure_ascii=False) 
+    content   = f"{canonical}|{visit_id}|{finalized_at}"
+    digest    = hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+    logger.info(f"Audit hash generated for visit {visit_id}: {digest[:16]}...")
+    return digest
+
+#Verify Audit Hash
+
+def verify_audit_hash(soap_note: dict,visit_id: str,finalized_at: str,stored_hash: str) -> bool:
+    computed = generate_audit_hash(soap_note,visit_id,finalized_at)
+    matches = computed == stored_hash
+
+    if not matches:
+        logger.warning(
+            f"Audit hash MISMATCH for visit {visit_id}! "
+            f"Stored: {stored_hash[:16]}... "
+            f"Computed: {computed[:16]}... "
+            "Note may have been modified after signing."
+        )
+    return matches
+
+
+def get_explainability_stats(explainable_soap: dict) -> dict:
+    """
+    Calculate explainability coverage statistics.
+    """
+    total    = 0
+    mapped   = 0
+    high_conf = 0
+
+    for section_sentences in explainable_soap.values():
+        for sent in section_sentences:
+            total += 1
+            if sent.get("source_start") is not None:
+                mapped += 1
+            if sent.get("match_confidence", 0) >= 0.6:
+                high_conf += 1
+
+    return {
+        "total_sentences":  total,
+        "mapped_sentences": mapped,
+        "high_confidence":  high_conf,
+        "coverage_percent": round(mapped / total * 100, 1) if total > 0 else 0,
+        "high_conf_percent": round(high_conf / total * 100, 1) if total > 0 else 0,
+    }
+
+
+    
     
