@@ -202,3 +202,47 @@ def detect_coding_gaps(diagnosis_entities: list[NEREntity],matched_codes: set[st
             })
     return gaps
 
+
+# CPT E&M CODE SELECTION
+# Evaluation & Management codes based on visit
+# complexity — this is a SIMPLIFIED model.
+# Real 2021+ CMS guidelines use Medical Decision
+# Making (MDM) complexity, not just duration/count.
+# This is an MVP approximation — flag for refinement
+# with full CMS E&M tables in production.
+
+
+CPT_EM_CODES = {
+    "99212": "Office/outpatient visit, established patient, straightforward",
+    "99213": "Office/outpatient visit, established patient, low complexity",
+    "99214": "Office/outpatient visit, established patient, moderate complexity",
+    "99215": "Office/outpatient visit, established patient, high complexity",
+}
+
+def suggest_cpt_codes(visit_duration_minutes: int,problems_addressed: int) -> dict:
+    if problems_addressed >= 3 or visit_duration_minutes >= 40:
+        code = "99215"
+        basis = "high complexity — 3+ problems or 40+ min visit"
+    elif problems_addressed == 2 or visit_duration_minutes >= 25:
+        code = "99214"
+        basis = "moderate complexity — 2 problems or 25+ min visit"
+    elif visit_duration_minutes >= 15:
+        code = "99213"
+        basis = "low complexity — single problem, 15+ min visit"
+    else:
+        code = "99212"
+        basis = "straightforward — brief visit"
+
+    return {
+        "code": code,
+        "description": CPT_EM_CODES[code],
+        "basis": basis,
+        "note": (
+            "Simplified MVP model based on duration and problem count. "
+            "Production use requires full CMS Medical Decision Making "
+            "complexity scoring for billing compliance."
+        ),
+    }
+
+
+
