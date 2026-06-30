@@ -1,0 +1,60 @@
+code,description
+E11.9,Type 2 diabetes mellitus without complications
+E11.65,Type 2 diabetes mellitus with hyperglycemia
+E11.21,Type 2 diabetes mellitus with diabetic nephropathy
+E11.22,Type 2 diabetes mellitus with diabetic chronic kidney disease
+E11.40,Type 2 diabetes mellitus with diabetic neuropathy, unspecified
+I10,Essential (primary) hypertension
+I11.9,Hypertensive heart disease without heart failure
+I20.0,Unstable angina
+I20.9,Angina pectoris, unspecified
+I21.9,Acute myocardial infarction, unspecified
+I21.4,Non-ST elevation (NSTEMI) myocardial infarction
+I25.10,Atherosclerotic heart disease of native coronary artery without angina pectoris
+I50.9,Heart failure, unspecified
+I50.22,Chronic systolic (congestive) heart failure
+I50.32,Chronic diastolic (congestive) heart failure
+I48.91,Unspecified atrial fibrillation
+I48.0,Paroxysmal atrial fibrillation
+J45.909,Unspecified asthma, uncomplicated
+J44.9,Chronic obstructive pulmonary disease, unspecified
+J18.9,Pneumonia, unspecified organism
+J06.9,Acute upper respiratory infection, unspecified
+J20.9,Acute bronchitis, unspecified
+R05,Cough
+R06.02,Shortness of breath
+R07.9,Chest pain, unspecified
+R51,Headache
+R42,Dizziness and giddiness
+R53.83,Other fatigue
+R10.9,Unspecified abdominal pain
+R11.0,Nausea
+R11.10,Vomiting, unspecified
+F32.9,Major depressive disorder, single episode, unspecified
+F33.9,Major depressive disorder, recurrent, unspecified
+F41.1,Generalized anxiety disorder
+F41.9,Anxiety disorder, unspecified
+F31.9,Bipolar disorder, unspecified
+F43.10,Post-traumatic stress disorder, unspecified
+N18.9,Chronic kidney disease, unspecified
+N18.3,Chronic kidney disease, stage 3 (moderate)
+N39.0,Urinary tract infection, site not specified
+K21.9,Gastro-esophageal reflux disease without esophagitis
+K29.70,Gastritis, unspecified, without bleeding
+M54.5,Low back pain
+M25.561,Pain in right knee
+M25.562,Pain in left knee
+M79.601,Pain in right arm
+M79.602,Pain in left arm
+E78.5,Hyperlipidemia, unspecified
+E78.0,Pure hypercholesterolemia
+E03.9,Hypothyroidism, unspecified
+E05.90,Thyrotoxicosis, unspecified
+L20.9,Atopic dermatitis, unspecified
+L30.9,Dermatitis, unspecified
+B34.9,Viral infection, unspecified
+A09,Infectious gastroenteritis and colitis, unspecified
+Z00.00,Encounter for general adult medical examination without abnormal findings
+Z79.4,Long term (current) use of insulin
+Z79.84,Long term (current) use of oral hypoglycemic drugs
+Z79.899,Other long term (current) drug therapy

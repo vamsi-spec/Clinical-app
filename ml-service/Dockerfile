@@ -27,6 +27,9 @@ RUN pip install --no-cache-dir \
 # Download spaCy base model directly to bypass metadata resolution issues
 RUN pip install --no-cache-dir https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.0/en_core_web_sm-3.7.0.tar.gz
 
+# In production, replace seed CSV with full CMS database
+COPY app/data/icd10_codes.csv app/data/icd10_codes.csv
+
 
 COPY . .
 
