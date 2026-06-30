@@ -96,9 +96,83 @@ def fuzzy_match_icd10(diagnosis_text: str,threshold: int = 70,limit: int = 3) ->
     except Exception as e:
         logger.error(f"Fuzzy matching failed: {e}")
         return []
-    
-    
-    
-    
-    
+
+
+# LAYER 2 — LLM CLASSIFICATION
+# Fallback for complex or ambiguous diagnoses
+# that fuzzy matching cannot confidently resolve
+
+def llm_suggest_icd10(soap_assessment: str,existing_codes: set[str]) -> list[ICD10Suggestion]:
+    try:
+        import ollama
+
+        prompt = f"""You are a medical billing coder. Given this clinical assessment,
+suggest the most appropriate ICD-10-CM codes.
+
+Assessment: {soap_assessment}
+
+Return ONLY valid JSON, no markdown, no explanation:
+{{
+  "suggestions": [
+    {{
+      "code": "E11.9",
+      "description": "Type 2 diabetes mellitus without complications",
+      "reasoning": "Patient has documented T2DM",
+      "confidence": "high"
+    }}
+  ]
+}}
+
+Suggest 1-4 codes maximum. Use real, valid ICD-10-CM codes only."""
+
+        client = ollama.Client(host=settings.ollama_base_url)
+        response = client.generate(model=settings.ollama_model,prompt=prompt,options={"temperatire":0.0},format="json")
+
+        raw = response.get("response","").strip()
+
+        raw = raw.replace("```json","").replace("```","").strip()
+
+        parsed = json.loads(raw)
+        suggestions_raw = parsed.get("suggestions",[])
+
+        confidence_map = {"high": 0.85,"medium":0.65,"low": 0.45}
+
+        validated = []
+        for item in suggestions_raw:
+            code = item.get("code","").strip().upper()
+            #  CRITICAL: validate against local database 
+            # LLMs hallucinate plausible but non-existent codes
+            # e.g. "E11.72" looks real but doesn't exist
+            if code not in _icd10_db:
+                logger.warning(f"llm hallucinated invalid ICD-10 code: {code}")
+                continue
+            
+            if code in existing_codes:
+                continue
+
+            confidence_str = item.get("confidence","medium").lower()
+            confidence = confidence_map.get(confidence_str,0.5)
+
+            validated.append(ICD10Suggestion(
+                code=code,
+                description=_icd10_db[code],  # use OUR description, not LLM's
+                confidence=confidence,
+                method="llm",
+                reasoning=item.get("reasoning", ""),
+            ))
+
+            logger.info(
+            f"LLM suggested {len(suggestions_raw)} codes, "
+            f"{len(validated)} validated against local database"
+        )
+        return validated
+
+    except json.JSONDecodeError as e:
+        logger.warning(f"LLM ICD-10 response was not valid JSON: {e}")
+        return []
+    except Exception as e:
+        logger.error(f"LLM ICD-10 suggestion failed: {e}")
+        return []
+
+        
 
