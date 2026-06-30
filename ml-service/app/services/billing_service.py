@@ -174,5 +174,31 @@ Suggest 1-4 codes maximum. Use real, valid ICD-10-CM codes only."""
         logger.error(f"LLM ICD-10 suggestion failed: {e}")
         return []
 
-        
+# CODING GAP DETECTION
+# Identifies diagnoses mentioned in the visit
+# (from NER) that have NO matching ICD-10 code
+# even at a low confidence threshold
+
+def detect_coding_gaps(diagnosis_entities: list[NEREntity],matched_codes: set[str],matched_diagnosis_texts: set[str]) -> list[dict]:
+    gaps = []
+
+    for entity in diagnosis_entities:
+        if entity.negated or "FAMILY" in entity.label:
+            continue
+
+        text_lower = entity.text.lower()
+        if text_lower in matched_diagnosis_texts:
+            continue
+
+        matches = fuzzy_match_icd10(entity.text,threshold=85,limit=1)
+
+        if not matches:
+            gaps.append({
+                "diagnosis": entity.text,
+                "warning": (
+                    f"No confident ICD-10 code found for '{entity.text}'. "
+                    "Manual coding review recommended."
+                ),
+            })
+    return gaps
 
