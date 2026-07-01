@@ -245,4 +245,44 @@ async def check_interactions_rxnav(rxcui_list: list[str], client: httpx.AsyncCli
         return []
 
 
+#STEP 3 Deduplication
+# RxNav sometimes returns the same pair twice
+# from different data sources (DrugBank, NDF-RT)
+# We keep the highest severity occurrence
+# and merge descriptions
+# A↔B and B↔A are the same interaction
+
+def deduplicate_interactions(interactions: list[DrugInteractionResult]) -> list[DrugInteractionResult]:
+    seen: dict[tuple[str,str],DrugInteractionResult] = {}
+
+    severity_rank = {
+        Severity.CRITICAL: 4,
+        Severity.HIGH:     3,
+        Severity.MEDIUM:   2,
+        Severity.LOW:      1,
+    }
+
+    for interaction in interactions:
+        pair_key = tuple(sorted([interaction.drug1.lower(),interaction.drug2.lower()]))
+
+        if pair_key not in seen:
+            seen[pair_key] = interaction
+        else:
+            existing = seen[pair_key]
+
+            if severity_rank.get(interaction.severity, 0) > \
+               severity_rank.get(existing.severity, 0):
+                seen[pair_key] = interaction
+
+        result = list(seen.values())
+        result.sort(
+            key=lambda x: severity_rank.get(x.severity, 0),
+            reverse=True)
+
+        return result
+    
+
+            
+
+
         
