@@ -71,6 +71,109 @@ def map_rxnav_severity(severity_string: str) -> Severity:
     )
     return Severity.LOW
 
+# DRUG NAME NORMALIZER
+# Cleans drug names before sending to RxNav
+# RxNav lookup is sensitive to formatting:
+# "Metformin 500mg" → "Metformin" (strip dosage)
+# "ASPIRIN" → "Aspirin" (normalize case)
+# "metformin hcl" → "metformin" (strip salt form)
+
+ DOSAGE_PATTERN = re.compile(
+    r'\s+\d+(?:\.\d+)?\s*(?:mg|mcg|g|ml|units?|iu|mmol|mEq|%|tab|cap|'
+    r'tablet|capsule|patch|cream|gel|solution|injection|spray|drop)s?\b.*$',
+    re.IGNORECASE
+)
+
+SALT_FORMS = re.compile(
+    r'\s+(?:hcl|hydrochloride|sodium|potassium|calcium|maleate|'
+    r'fumarate|succinate|tartrate|mesylate|besylate|sulfate|'
+    r'phosphate|acetate|citrate)\b.*$',
+    re.IGNORECASE
+)
+
+ROUTE_PATTERN = re.compile(
+    r'\s+(?:oral|iv|topical|sublingual|inhaled|subcutaneous|'
+    r'intramuscular|transdermal|ophthalmic|otic|rectal|nasal)\b.*$',
+    re.IGNORECASE
+)
 
 
+def normalize_drug_name(drug_text: str) -> str:
+    """
+    Strip dosage, salt forms, and routes from medication names.
 
+    RxNav lookup works best with generic drug name only.
+    Examples:
+        "Metformin 500mg twice daily" → "Metformin"
+        "atorvastatin calcium 40mg" → "atorvastatin"
+        "Lisinopril-HCTZ 10/12.5mg" → "Lisinopril"
+        "aspirin 75mg oral" → "aspirin"
+    """
+
+    name = drug_text.strip()
+
+    name  = DOSAGE_PATTERN.sub('',name)
+    name = SALT_FORMS.sub('',name)
+    name = ROUTE_PATTERN.sub('',name)
+
+    name = name.strip(' .,;:-/')
+
+    return name
+
+#STEP 1 RXNORM CUI lookup
+#converting the drug name to RxNorm Concept unique ID
+
+# Two strategies:
+# A) Exact lookup: GET /rxcui.json?name=Metformin
+# B) Approximate: GET /approximateTerm.json?term=Metformin
+# A first, B as fallback for misspellings or brand names
+
+async def get_rxcui(drug_name: str,client:httpx.AsyncClient) -> Optional[str]:
+    try:
+        resp = await client.get(RXNORM_LOOKUP_URL,params={"name":drug_name,"allsrc":"0"},timeout=RXNAV_TIMEOUT)
+
+        resp.raise_for_status()
+        data = resp.json()
+
+        # RxNav returns {"idGroup": {"rxnormId": ["860975"]}}
+        rxnorm_ids = (data.get("idGroup",{}).get("rxnormId",[]))
+
+        if rxnorm_ids:
+            logger.debug(f"Exact CUI lookup: '{drug_name}' → {rxnorm_ids[0]}")
+            return rxnorm_ids[0]
+
+    except Exception as e:
+        logger.debug(f"Exact CUI lookup failed for '{drug_name}': {e}")
+
+    # Try approximate match for misspellings / brand names
+    # Handles brand names: "Glucophage" → finds Metformin CUI
+    # Handles partial names: "metfor" → finds Metformin
+    try:
+        resp = await client.get(RXNORM_APPROX_URL,
+        params={
+            "term": drug_name,
+            "maxEntries": 1,
+            "option": "1",
+        },timeout=RXNAV_TIMEOUT)
+
+        resp.raise_for_status()
+        data = resp.json()
+
+        candidates = (
+            data.get("approximateGroup",{}).get("candidate",[])
+        )
+
+        if candidates:
+            rxcui = candidates[0].get("rxcui")
+            if rxcui:
+                logger.debug(f"Approximate CUI for '{drug_name}': {rxcui}")
+                return rxcui
+        
+    except Exception as e:
+        logger.error(f"Approximate CUI lookup failed for '{drug_name}': {e}")
+    
+    logger.info(f"No RxNorm CUI found for drug: '{drug_name}'")
+    return None
+
+
+        
