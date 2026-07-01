@@ -244,5 +244,107 @@ def suggest_cpt_codes(visit_duration_minutes: int,problems_addressed: int) -> di
         ),
     }
 
+def suggest_billing_codes(soap_assessment: str,diagnosis_entities: list[NEREntity],visit_duration_minutes: int) -> dict:
+    """
+    Full billing code suggestion pipeline.
 
+    Steps:
+    1. Fuzzy match each NER diagnosis entity against ICD-10 DB
+    2. If fuzzy matching found < 2 confident codes, run LLM fallback
+       on the full SOAP assessment for broader context
+    3. Validate all LLM suggestions against local database
+    4. Detect coding gaps — diagnoses with no matching code
+    5. Suggest CPT E&M code based on visit complexity
+
+    Args:
+        soap_assessment: SOAP note Assessment section
+        diagnosis_entities: Diagnosis entities from NER (Phase 5)
+        visit_duration_minutes: Visit duration for CPT selection
+
+    Returns:
+        Dict with icd10_codes, cpt_code, coding_gaps
+    """
+
+    start_time = time.time()
+
+    all_icd10: list[ICD10Suggestion] = []
+    matched_codes: set[str] = set()
+    matched_diagnosis_texts: set[str] = set()
+
+    # STEP 1 - fuzzy matching
+    logger.info(f"Starting ICD-10 fuzzy matching for {len(diagnosis_entities)} entities...")
+    active_diagnoses = [
+        e for e in active_diagnoses if not e.negated and "FAMILY" not in e.label
+    ]
+
+    for entity in active_diagnoses:
+        matches = fuzzy_match_icd10(entity.text)
+        for match in matches:
+            if match.code not in matched_codes:
+                all_icd10.append(match)
+                matched_codes.add(match.code)
+                matched_diagnosis_texts.add(entity.text.lower())
+                
+    logger.info(f"Fuzzy matching completed: {len(all_icd10)} codes found")
+
+    #STEP 2: LLM fallback if coverage is thin
+
+    needs_llm_fallback = (len(all_icd10) < max(1,len(active_diagnoses) // 2)) and soap_assessment and len(soap_assessment.strip()) > 20
+
+    if needs_llm_fallback:
+        logger.info("Coverage thin (<50% diagnoses matched), running LLM fallback")
+        llm_suggestions = llm_suggest_icd10(soap_assessment,matched_codes)
+        for suggestion in llm_suggestions:
+            all_icd10.append(suggestion)
+            matched_codes.add(suggestion.code)
+    #STEP 3: Sort by confidence , highest
+    all_icd10.sort(key=lambda s: s.confidence,reverse=True)
+
+    all_icd10 = all_icd10[:8]
+
+    #STEP 4: coding gap detection
+    coding_gaps = detect_coding_gaps(active_diagnoses,matched_codes,matched_diagnosis_texts)
+
+    #STEP 5: CPT
+    cpt_code = suggest_cpt_code(
+        visit_duration_minutes=visit_duration_minutes,
+        problems_addressed=len(active_diagnoses),
+    )
+
+    elapsed = round(time.time() - start_time, 3)
+    logger.info(
+        f"Billing suggestion complete: {elapsed}s, "
+        f"{len(all_icd10)} ICD-10 codes, "
+        f"{len(coding_gaps)} gaps, "
+        f"CPT={cpt_code['code']}"
+    )
+
+    return {
+        "icd10_codes": [s.model_dump() for s in all_icd10],
+        "cpt_code": cpt_code,
+        "coding_gaps": coding_gaps,
+        "metadata": {
+            "duration_seconds": elapsed,
+            "fuzzy_match_count": sum(
+                1 for s in all_icd10 if s.method == "fuzzy_match"
+            ),
+            "llm_suggested_count": sum(
+                1 for s in all_icd10 if s.method == "llm"
+            ),
+            "icd10_database_size": len(_icd10_db),
+        },
+    }
+
+
+def get_billing_stats(result: dict) -> dict:
+    return {
+        "total_codes_suggested": len(result.get("icd10_codes", [])),
+        "coding_gaps_count": len(result.get("coding_gaps", [])),
+        "cpt_code": result.get("cpt_code", {}).get("code"),
+        "has_gaps": len(result.get("coding_gaps", [])) > 0,
+    }
+
+
+    
+    
 
