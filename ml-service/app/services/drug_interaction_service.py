@@ -175,5 +175,74 @@ async def get_rxcui(drug_name: str,client:httpx.AsyncClient) -> Optional[str]:
     logger.info(f"No RxNorm CUI found for drug: '{drug_name}'")
     return None
 
+#STEP 2 RXNAV INTERACTION CHECK
+# Send list of CUI codes to RxNav
+# Returns all known interactions between them
+# RxNav checks every pair internally —we don't need to enumerate pairs yourself
+
+
+async def check_interactions_rxnav(rxcui_list: list[str], client: httpx.AsyncClient) -> list[dict]:
+    if len(rxcui_list) < 2:
+        return []
+
+    try:
+        rxcuis_param = "+".join(rxcui_list)
+        resp = await client.get(INTERACTION_URL,params = {"rxcuis": rxcuis_param},timeout=RXNAV_TIMEOUT)
+        resp.raise_for_status()
+        data = resp.json()
+
+        #Parse Rxnav response structure
+        interactions = []
+        groups = data.get("fullInteractionTypeGroup",[]) or []
+
+        for group in groups:
+            interaction_types = group.get("fullInteractionType",[]) or []
+            for itype in interaction_types:
+                pairs = itype.get("interactionPair",[]) or []
+                for pair in pairs:
+                    concepts = pair.get("interactionConcept",[])
+                    if len(concepts) < 2:
+                        continue
+
+                    drug1 = (
+                        concepts[0]
+                        .get("minConceptItem", {})
+                        .get("name", "Unknown")
+                    )
+                    drug2 = (
+                        concepts[1]
+                        .get("minConceptItem", {})
+                        .get("name", "Unknown")
+                    )
+
+                    severity_str = pair.get("severity", "")
+                    description  = pair.get("description", "")
+
+                    interactions.append({
+                        "drug1":       drug1,
+                        "drug2":       drug2,
+                        "severity":    severity_str,
+                        "description": description,
+                    })
+
+        logger.info(
+            f"RxNav returned {len(interactions)} interactions "
+            f"for {len(rxcui_list)} drugs"
+        )
+        return interactions
+
+    except httpx.TimeoutException:
+        logger.warning(
+            f"RxNav interaction check timed out after {RXNAV_TIMEOUT}s. "
+            "Network issue or RxNav service unavailable."
+        )
+        return []
+    except httpx.HTTPStatusError as e:
+        logger.warning(f"RxNav HTTP error: {e.response.status_code}")
+        return []
+    except Exception as e:
+        logger.error(f"RxNav interaction check failed: {e}")
+        return []
+
 
         
