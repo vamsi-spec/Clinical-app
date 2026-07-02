@@ -280,7 +280,106 @@ def deduplicate_interactions(interactions: list[DrugInteractionResult]) -> list[
             reverse=True)
 
         return result
-    
+
+
+# KNOWN HIGH-RISK PAIRS — LOCAL FALLBACK
+# When RxNav is unavailable (offline clinic,
+# network issues), check against a curated list
+# of the most dangerous drug combinations
+# This is NOT comprehensive — it is a safety net
+# for the most common life-threatening interactions
+
+KNOWN_CRITICAL_PAIRS: list[dict] = [
+    {
+        "drugs": {"maoi", "ssri", "sertraline", "fluoxetine",
+                  "paroxetine", "citalopram", "escitalopram",
+                  "phenelzine", "tranylcypromine", "selegiline"},
+        "match_any_pair": True,
+        "severity": Severity.CRITICAL,
+        "description": (
+            "MAOIs combined with SSRIs risk severe serotonin syndrome — "
+            "potentially fatal. Absolute contraindication."
+        ),
+    },
+    {
+        "drugs": {"warfarin", "aspirin", "ibuprofen", "naproxen",
+                  "diclofenac", "nsaid"},
+        "match_any_pair": True,
+        "severity": Severity.HIGH,
+        "description": (
+            "Warfarin combined with NSAIDs significantly increases "
+            "bleeding risk. Monitor INR closely or avoid combination."
+        ),
+    },
+    {
+        "drugs": {"metformin", "contrast", "iodinated contrast",
+                  "iv contrast"},
+        "match_any_pair": True,
+        "severity": Severity.HIGH,
+        "description": (
+            "Metformin with iodinated contrast media risks lactic acidosis. "
+            "Hold metformin 48 hours before and after contrast administration."
+        ),
+    },
+    {
+        "drugs": {"atorvastatin", "simvastatin", "lovastatin",
+                  "gemfibrozil", "fenofibrate"},
+        "match_any_pair": True,
+        "severity": Severity.HIGH,
+        "description": (
+            "Statin combined with fibrate increases risk of myopathy and "
+            "rhabdomyolysis. Use lowest statin dose or avoid combination."
+        ),
+    },
+    {
+        "drugs": {"ace inhibitor", "lisinopril", "enalapril", "ramipril",
+                  "potassium", "spironolactone", "eplerenone"},
+        "match_any_pair": True,
+        "severity": Severity.HIGH,
+        "description": (
+            "ACE inhibitor combined with potassium-sparing diuretic "
+            "or potassium supplement risks severe hyperkalemia."
+        ),
+    },
+]
+
+
+def check_known_pairs_fallback(
+    drug_names: list[str],
+) -> list[DrugInteractionResult]:
+    """
+    Check medications against curated high-risk pairs.
+
+    Used when RxNav is unavailable. Not comprehensive —
+    only covers the most dangerous common combinations.
+
+    Args:
+        drug_names: List of normalized drug names
+
+    Returns:
+        List of interactions found in curated pairs
+    """
+    drug_names_lower = {name.lower() for name in drug_names}
+    interactions = []
+
+    for pair_config in KNOWN_CRITICAL_PAIRS:
+        known_drugs = pair_config["drugs"]
++        matching = drug_names_lower & known_drugs
+
+        if len(matching) >= 2:
+            matching_list = sorted(matching)
+            interactions.append(DrugInteractionResult(
+                drug1=matching_list[0],
+                drug2=matching_list[1],
+                severity=pair_config["severity"],
+                description=pair_config["description"],
+                source="local_fallback",
+            ))
+
+    return interactions
+
+
+
 
             
 
