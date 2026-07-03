@@ -152,6 +152,11 @@ async def lifespan(app: FastAPI):
             return_exceptions=True,
         )
 
+    from app.services.billing_service import get_icd10_db_size
+    icd10_size = get_icd10_db_size()
+
+
+
     # Mark service ready
     if model_state["whisper"] is not None:
         model_state["models_loaded"] = True
@@ -226,31 +231,85 @@ app.include_router(transcription.router,prefix="/transcribe",tags=["Transcriptio
 app.include_router(soap.router, prefix="/soap", tags=["SOAP Generation"])
 app.include_router(ner.router,prefix="/ner",tags=[" Clinical NER"])
 
+from app.routers import billing
+from app.routers import drug_interaction
+
+app.include_router(billing.router,prefix="/billing",tags=["Billing"])
+app.include_router(drug_interaction.router,prefix="/drugs",tags=["Drug Interaction"])
 
 
 
-@app.get("/health")
+
+@app.get("/health",tags=["Health Check"])
 async def health_check():
+    from app.services.billing_service import get_icd10_db_size
+    icd10_size = get_icd10_db_size()
+
     return {
-        "status": "ok",
+        "status": "ok" if model_state["models_loaded"] else "initializing",
         "environment": settings.environment,
-        "models_loaded": model_state['models_loaded'],
-        "models": {
-            "whisper": model_state["whisper"] is not None,
-            "diarization": model_state["diarization"] is not None,
-            "wav2vec2": model_state["wav2vec2_processor"] is not None,
-            "nlp_bc5cdr": model_state["nlp_bc5"] is not None,
-            "nlp_sci_md": model_state["nlp_sci"] is not None,
-            "embedder": model_state["embedder"] is not None,
+        "models_loaded": model_state["models_loaded"],
+        "phases": {
+            "transcription": {
+                "whisper": {
+                    "loaded":   model_state["whisper"] is not None,
+                    "critical": True,
+                    "model":    settings.whisper_model_size,
+                },
+                "diarization": {
+                    "loaded":   model_state["diarization"] is not None,
+                    "critical": False,
+                },
+                "wav2vec2": {
+                    "loaded":   model_state["wav2vec2_processor"] is not None,
+                    "critical": False,
+                },
+            },
+            "intelligence": {
+                "nlp_bc5cdr": {
+                    "loaded":   model_state["nlp_bc5"] is not None,
+                    "critical": False,
+                },
+                "nlp_sci_md": {
+                    "loaded":   model_state["nlp_sci"] is not None,
+                    "critical": False,
+                },
+                "embedder": {
+                    "loaded":   model_state["embedder"] is not None,
+                    "critical": False,
+                },
+            },
+            "billing": {
+                "icd10_database": {
+                    "loaded":     icd10_size > 0,
+                    "code_count": icd10_size,
+                    "critical":   False,
+                },
+                "cpt_codes": {
+                    "loaded":   True,
+                    "critical": False,
+                },
+            },
+            "drug_interactions": {
+                "rxnav_api": {
+                    "loaded":   True,
+                    "note":     "On-demand HTTP calls — no pre-load needed",
+                    "critical": False,
+                },
+                "local_fallback": {
+                    "loaded":   True,
+                    "pairs":    5,
+                    "critical": False,
+                },
+            },
         },
         "loading_errors": model_state["loading_errors"],
         "config": {
-            "whisper_model": settings.whisper_model_size,
-            "ollama_model": settings.ollama_model,
+            "whisper_model":        settings.whisper_model_size,
+            "ollama_model":         settings.ollama_model,
             "confidence_threshold": settings.confidence_threshold,
         },
     }
-
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
