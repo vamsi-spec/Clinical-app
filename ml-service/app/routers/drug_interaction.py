@@ -153,14 +153,16 @@ async def drug_interaction_health():
     Returns 200 if reachable, 503 if not.
     Service degrades gracefully to local fallback when RxNav is down.
     """
-
     try:
         import httpx
         async with httpx.AsyncClient() as client:
-            resp = await client.get("https://rxnav.nlm.nih.gov/REST/version.json",timeout=5.0,)
+            resp = await client.get(
+                "https://rxnav.nlm.nih.gov/REST/version.json",
+                timeout=5.0,
+            )
             resp.raise_for_status()
             data = resp.json()
-            rxnav_version = data.get("version","unknown")
+            rxnav_version = data.get("version", "unknown")
 
         return JSONResponse(
             status_code=200,
@@ -179,9 +181,8 @@ async def drug_interaction_health():
                 },
             }
         )
-
-        except Exception as e:
-            logger.warning(f"RxNav health check failed: {e}")
+    except Exception as e:
+        logger.warning(f"RxNav health check failed: {e}")
         return JSONResponse(
             status_code=503,
             content={
@@ -197,5 +198,3 @@ async def drug_interaction_health():
                 },
             }
         )
-    
-
