@@ -128,11 +128,63 @@ async def suggest_billing(request: BillingRequest,):
         stats=stats,
     )
     
-    return BillingResponseBody(
-        visit_id=request.visit_id,
-        icd10_codes=result['icd10_codes'],
-        cpt_code=result['cpt_code'],
-        coding_gaps=result['coding_gaps'],
-        metadata=result['metadata'],
-        stats=result['stats'],
+
+# GET /billing/search
+# Direct ICD-10 code search
+# Used by doctor UI for manual code lookup
+# Bypasses NER — searches directly by text
+
+@router.get("/search",summary="Search ICD-10 codes by description")
+
+async def search_icd10(query: str,threshold: int = 60,limit: int = 5):
+    if not query or len(query.strip()) < 2:
+        raise HTTPException(status_code=400,detail="Query must be at least 2 characters")
+
+    limit = min(limit,10)
+
+    import asyncio
+    loop = asyncio.get_event_loop()
+
+    matches = await loop.run_in_executor(
+        None,
+        lambda: fuzzy_match_icd10(query.strip(),threshold=threshold,limit = limit)
     )
+
+    return {
+        "query": query,
+        "threshold": threshold,
+        "results": [m.model_dump() for m in matches],
+        "count": len(matches)
+    }
+
+
+# GET /billing/health
+# Reports billing service status
+
+@router.get("/health")
+async def billing_health():
+    db_size = get_icd10_db_size()
+    return JSONResponse(
+        status_code=200 if db_size > 0 else 503,
+        content={
+            "status": "ready" if db_size > 0 else "degraded",
+            "icd10_database": {
+                "loaded": db_size > 0,
+                "code_count": db_size,
+                "note": (
+                    "Production: download full CMS ICD-10 dataset (~70,000 codes). "
+                    "Current: seed data only."
+                    if db_size < 1000
+                    else "Full ICD-10 database loaded."
+                )
+            },
+            "cpt_codes": {
+                "loaded": True,
+                "codes": ["99212", "99213", "99214", "99215"],
+                "note": "Simplified E&M model — not full CMS MDM scoring",
+            },
+        }
+    )
+
+
+    
