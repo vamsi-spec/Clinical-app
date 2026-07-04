@@ -14,7 +14,7 @@ def load_wav2vec2_model():
         from transformers import Wav2Vec2ForCTC, Wav2Vec2Processor
 
         model_name = "facebook/wav2vec2-base-960h"
-        logger.info(f"Loading Wav2vec2 model:" {model_name})
+        logger.info(f"Loading Wav2vec2 model: {model_name}")
 
         processor = Wav2Vec2Processor.from_pretrained(model_name)
         model = Wav2Vec2ForCTC.from_pretrained(model_name)
