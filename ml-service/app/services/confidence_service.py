@@ -1,5 +1,6 @@
 import math
 import logging
+from typing import Optional
 
 
 from app.models.schemas import (
@@ -43,9 +44,9 @@ def score_segment(segment: RawWhisperSegment,threshold: Optional[float]=None) ->
     for word in segment.words:
         #word confidence is already 0 to 1 from whisper
         scored_words.append(WordTimestamp(
-            word=word.word
-            start=word.start
-            end=word.end
+            word=word.word,
+            start=word.start,
+            end=word.end,
             confidence=round(word.confidence,3)
         ))
 
