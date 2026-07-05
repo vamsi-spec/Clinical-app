@@ -56,7 +56,6 @@ def transcribe_audio(audio_path: str,whisper_model:whisper.Whisper) -> WhisperRa
     logger.info(f"Starting transcription for {audio_path}")
     
     validate_audio_file(audio_path)
-    
 
     use_fp16 = torch.cuda.is_available()
 
@@ -73,63 +72,60 @@ def transcribe_audio(audio_path: str,whisper_model:whisper.Whisper) -> WhisperRa
             logprob_threshold=-1.0,
             no_speech_threshold=0.6,
         )
+    except Exception as e:
+        logger.error(f"Whisper transcription failed: {e}")
+        raise RuntimeError(f"Failed to transcribe audio: {str(e)}")
 
-        except Exception as e:
-            logger.error(f"Whisper transcription failed: {e}")
-            raise RuntimeError(f"Failed to transcribe audio: {str(e)}")
+    segments = []
+    for seg in result.get("segments",[]):
+        no_speech_prob = seg.get("no_speech_prob",0.0)
+        if no_speech_prob > 0.90:
+            logger.debug(f"Skipping likely non-speech segment at {seg['start']:.1f}s (no_speech_prob:{no_speech_prob:.2f})")
+            continue
 
-        
-        segments = []
-        for seg in result.get("segments",[]):
-            no_speech_prob = seg.get("no_speech_prob",0.0)
-            if no_speech_prob > 0.90:
-                logger.debug("Skipping likely non-speech segment at" f"{seg['start']:.1f}s(no_speech_prob:{no_speech_prob:.2f})")
-                continue
+        segment_duration = seg["end"] - seg["start"]
+        if segment_duration < 0.3:
+            continue
 
-            segment_duration = seg["end"] - seg["start"]
-            if(segment_duration < 0.3):
-                continue
-
-
-            words = []
-            for word_data in seg.get("words",[]):
-                words.append(WordTimestamp(
-                    word=word_data.get("word","").strip(),
-                    start=round(word_data.get("start",0.0),3),
-                    end=round(word_data.get("end",0.0),3),
-                    confidence=round(float(word_data.get("probability",1.0)),3)
-                ))
-            segments.append(RawWhisperSegment(
-                id=seg.get("id",len(segments)),
-                start=round(seg["start"],3),
-                end=round(seg["end"],3),
-                text=seg["text"].strip(),
-                avg_logprob=round(seg.get("avg_logprob",-0.5),4),
-                no_speech_prob=round(no_speech_prob,4)
-                words=words
+        words = []
+        for word_data in seg.get("words",[]):
+            words.append(WordTimestamp(
+                word=word_data.get("word","").strip(),
+                start=round(word_data.get("start",0.0),3),
+                end=round(word_data.get("end",0.0),3),
+                confidence=round(float(word_data.get("probability",1.0)),3)
             ))
+        segments.append(RawWhisperSegment(
+            id=seg.get("id",len(segments)),
+            start=round(seg["start"],3),
+            end=round(seg["end"],3),
+            text=seg["text"].strip(),
+            avg_logprob=round(seg.get("avg_logprob",-0.5),4),
+            no_speech_prob=round(no_speech_prob,4),
+            words=words
+        ))
 
-        duration = 0.0
-        if segments:
-            duration=segments[-1].end
-        elif result.get("segments"):
-            duration = result["segments"][-1].get("end",0.0)
+    duration = 0.0
+    if segments:
+        duration = segments[-1].end
+    elif result.get("segments"):
+        duration = result["segments"][-1].get("end",0.0)
 
-        full_text = " ".join(seg.text for seg in segments).strip()
+    full_text = " ".join(seg.text for seg in segments).strip()
 
-        detected_language = result.get("language","en")
+    detected_language = result.get("language","en")
 
-        logger.info(f"Transcription completed in{duration:.}s,{len(segments)} segments",f"Language: {detected_language}")
+    logger.info(f"Transcription completed in {duration:.1f}s, {len(segments)} segments. Language: {detected_language}")
 
-        if not segments:
-            logger.warning("No valid segments extracted from whisper output.")
+    if not segments:
+        logger.warning("No valid segments extracted from whisper output.")
 
-        return WhisperRawResult(
-            segments=segments,
-            full_text=full_text,
-            detected_language=detected_language,
-            duration=round(duration,2),
-        )
+    return WhisperRawResult(
+        segments=segments,
+        full_text=full_text,
+        detected_language=detected_language,
+        duration=round(duration,2),
+    )
 
 
 LANGUAGE_NAMES = {

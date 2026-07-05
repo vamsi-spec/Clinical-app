@@ -67,7 +67,7 @@ def run_whisper_and_diarization_parallel(audio_path: str,model_state: dict,num_s
         diarization_future = executor.submit(run_diarization)
 
         whisper_output = whisper_future.result()
-        diarization_output = diarization_future()
+        diarization_output = diarization_future.result()
 
     if isinstance(whisper_output,Exception):
         whisper_error = str(whisper_output)
@@ -121,7 +121,7 @@ def convert_to_enriched_segments(scored_segments: list,) -> list[EnrichedSegment
             original_text=get("original_text", None),
             words=get("words", []),
         ))
-        return enriched
+    return enriched
 
 
 def run_transcription_pipeline(audio_path: str,model_state: dict,num_speakers: Optional[int] = None,specialty: str = "general",status_callback=None) -> TranscriptionResponse:
@@ -161,7 +161,7 @@ def run_transcription_pipeline(audio_path: str,model_state: dict,num_speakers: O
 
     #Step 2 -> Noise Filtering and Punctuation
 
-    callback(PipelineStatus.CONFIDENCE_SCORING,"Filtering noise and scoring confidence...")
+    callback(PipelineStatus.CONFIDENCE_SCORING,"Filtering noise and scoring confidence...",30)
 
     filtered_segments = filter_noise_segments(whisper_result.segments)
 

@@ -66,7 +66,7 @@ def correct_segment_audio(audio_array,wav2vec2_processor,wav2vec2_model) -> Opti
         with torch.no_grad():
             output = wav2vec2_model(input_values).logits
 
-        predicted_ids = torch.argmax(logits,dim=-1)
+        predicted_ids = torch.argmax(output,dim=-1)
         transcription = wav2vec2_processor.decode(predicted_ids[0])
 
         return transcription.lower().strip()
@@ -146,7 +146,7 @@ def correct_low_confidence_segments(audio_path: str,scored_segments: list[Scored
             segment.original_text = segment.text
             segment.text = corrected_text
             segment.corrected = True
-            corrected_count += 1
+            corrected_cnt += 1
             logger.debug(
                 f"Correction accepted at {segment.start:.1f}s: "
                 f"'{segment.original_text}' → '{corrected_text}'"

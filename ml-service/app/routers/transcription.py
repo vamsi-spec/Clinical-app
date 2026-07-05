@@ -13,7 +13,7 @@ from app.config import settings
 
 
 logger = logging.getLogger(__name__)
-router = APIRouter
+router = APIRouter()
 
 #must check what multer accepts on the node side
 
@@ -58,22 +58,22 @@ async def save_temp_audio(file: UploadFile,temp_dir: str = "temp") -> str:
     temp_filename = f"audio-{uuid.uuid4().hex}{ext}"
     temp_path = os.path.join(temp_dir,temp_filename)
 
-    #Stream file to dist - dont load entire file to memory
+    #Stream file to disk - dont load entire file to memory
     #critical for large size
 
     total_bytes = 0
     try:
         async with aiofiles.open(temp_path,"wb") as f:
-            while chunk := await file.read(1024 * 1024)
-            total_bytes += len(chunk)
-            if total_bytes > MAX_FILE_SIZE
-            await f.close()
-            os.unlink(temp_path)
-            raise HTTPException(
-                status_code=413,
-                detail = f"File too large. Maximum size is {MAX_FILE_SIZE // (1024 * 1024)} MB"
-            )
-        await f.write(chunk)
+            while chunk := await file.read(1024 * 1024):
+                total_bytes += len(chunk)
+                if total_bytes > MAX_FILE_SIZE:
+                    await f.close()
+                    os.unlink(temp_path)
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"File too large. Maximum size is {MAX_FILE_SIZE // (1024 * 1024)} MB"
+                    )
+                await f.write(chunk)
     except HTTPException:
         raise
     except Exception as e:
