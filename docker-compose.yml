@@ -106,30 +106,30 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
 
-      volumes:
-        - kafka_data:/var/lib/kafka/data
-      healthcheck:
-        test: ["CMD","kafka-topics","--bootstrap-server","localhost:9092","--list"]
-        interval: 10s
-        timeout: 10s
-        retries: 10
-        start_period: 20s
-      networks:
-        - clinical_network
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD","kafka-topics","--bootstrap-server","localhost:9092","--list"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+    networks:
+      - clinical_network
 
-kafka-ui:
-  image: provectuslabs/kafka-ui:latest
-  container_name: clinical_kafka_ui
-  depends_on:
-    - kafka
-  ports:
-    - "8090:8080"
-  environment:
-    KAFKA_CLUSTERS_0_NAME: clinical-local
-    KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
-    # KAFKA_CLUSTERS_0_ZOOKEEPER line removed — KRaft has no Zookeeper
-  networks:
-    - clinical_network
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: clinical_kafka_ui
+    depends_on:
+      - kafka
+    ports:
+      - "8090:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: clinical-local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      # KAFKA_CLUSTERS_0_ZOOKEEPER line removed — KRaft has no Zookeeper
+    networks:
+      - clinical_network
 
 
 
@@ -212,6 +212,7 @@ volumes:
   redis_data:
   ollama_models:
   ml_model_cache:
+  kafka_data:
 
 # ============================================
 # NETWORKS
