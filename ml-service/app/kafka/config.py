@@ -107,7 +107,48 @@ def publish_event(topic: str,key: str,payload: dict) -> str:
         logger.error(f"Failed to publish to {topic}: {e}")
         raise
 
+def flush_producer(timeout: float = 10.0):
+    """
+    Block until all pending messages are delivered.
+    Call this before process shutdown to avoid losing
+    buffered messages that haven't been sent yet.
+    """
 
+    if _producer is not None:
+        remaining  = _producer.flush(timeout)
+        if remaining > 0:
+            logger.warning(f"{remaining} messages still in queue flush timeout")
+
+
+def create_consumer(group_id: str,topics: list[str]) -> Consumer:
+    consumer = Consumer({
+        "bootstrap.servers": get_kafka_brokers(),
+        "group.id": group_id,
+        "client.id": "clinical-note-ml-service",
+        "auto.offset.reset": "earliest",
+        "enable.auto.commit": False,
+        "session.timeout.ms": 30000,
+        "heartbeat.interval.ms": 3000,
+    })
+
+    consumer.subscribe(topics)
+
+    logger.info(f"Consumer created for group {group_id} for topics {topics}")
+
+    return consumer
+
+def parse_envelope(raw_message_value: bytes) -> dict:
+    """
+    Parse the standard event envelope from a raw Kafka message.
+    Shared parsing logic used by every consumer in this service.
+    """
+
+    try:
+        return json.loads(raw_message_value.decode("utf-8"))
+
+    except (json.JSONDecodeError,UnicodeDecodeError) as e:
+        logger.error(f"Failed to parse Kafka message envelope: {e}")
+        raise
 
     
 
