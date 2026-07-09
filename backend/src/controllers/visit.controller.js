@@ -83,3 +83,113 @@ export const createVisit = async (req,res)=>{
     return errorResponse(res, 500, 'Failed to create visit', error);
   }
 }
+
+
+//List Visits
+//ADMIN -> All visits
+//Doctor-> own vists only
+//Nurse -> visits of assigned doctor only
+//Receptionist -> no clinical visits access (work with appointments only, not visits)
+
+export const listVisits = async (req,res) => {
+    try {
+        const {patientId,doctorId,status,dateFrom,dateTo,includeArchived,page,limit} = req.query;
+
+        if(req.user.role === 'RECEPTIONIST') {
+            return errorResponse(res,403,'Receptionist does not have access to visits')
+        }
+
+        const pageNum = parseInt(page,10);
+        const limitNum = parseInt(limit,10);
+        const skip = (pageNum - 1) * limitNum;
+
+        const where = {};
+        if(req.user.role === 'DOCTOR') {
+            where.doctorId = req.user.id;
+        }
+        else if(req.user.role === 'NURSE') {
+            if(!req.user.assignedDoctorId) {
+                return successResponse(res,200,'Nurse has no assigned doctor',{
+                    visits: [],
+                    pagination: {total: 0,page: pageNum,limit: limitNum,pages: 0}
+                })
+            }
+            where.doctorId = req.user.assignedDoctorId;
+        }
+
+        if(patientId) where.patientId = patientId;
+        if(doctorId && req.user.role === 'ADMIN') where.doctorId = doctorId;
+        if(status) where.pipelineStatus = status
+        if(includeArchived !== 'true') where.isArchived = false
+
+        if(dateFrom || dateTo) {
+            where.visitDate = {};
+            if(dateFrom) where.visitDate.gte = new Date(dateFrom);
+            if(dateTo) where.visitDate.lte = new Date(dateTo);
+        }
+
+        const [visits,total] = await Promise.all([
+            prisma.visit.findMany({
+                where,
+                skip,
+                take: limitNum,
+                orderBy: {visitDate: 'desc'},
+                include: {
+                    patient: {select: {id: true,firstName: true,lastName: true,mrn:true}},
+                    doctor: {select: {id: true,name: true,specialty: true}},
+                    soapNote: {select: {id: true,isFinalized: true}},
+                },
+            }),
+            prisma.visit.count({where})
+        ])
+
+        return paginatedResponse(res, 200, 'Visits retrieved', visits, {
+      total, page: pageNum, limit: limitNum, pages: Math.ceil(total / limitNum),
+    });
+  } catch (error) {
+    logger.error(`listVisits error: ${error.message}`);
+    return errorResponse(res, 500, 'Failed to list visits', error);
+  }
+}
+
+
+//Get a particular visit detail
+//Full record including all pipeline output -> SOAP note,NER results,billing codes,drug interaction. this is what VISIT page shows
+
+export const getVisit = async (req,res) => {
+    try {
+        const {id} = req.params;
+
+        const {visit} = await prisma.visit.findUnique({
+            where: {id},
+            include: {
+                patient: true,
+                doctor: {select: {id: true,name: true,specialty: true,email:true}},
+                appointment: true,
+                soapNote: true,
+                nerResult: true,
+                billingCode: true,
+                drugInteractions: true,
+            }
+        })
+
+        if(!visit) {
+            return errorResponse(res,404,'Visit not found');
+        }
+
+        if (req.user.role === 'DOCTOR' && visit.doctorId !== req.user.id) {
+      return errorResponse(res, 403, 'You do not have access to this visit');
+    }
+    if (req.user.role === 'NURSE' && visit.doctorId !== req.user.assignedDoctorId) {
+      return errorResponse(res, 403, 'You do not have access to this visit');
+    }
+    if (req.user.role === 'RECEPTIONIST') {
+      return errorResponse(res, 403, 'Receptionists do not have access to clinical visit records');
+    }
+
+    return successResponse(res, 200, 'Visit retrieved', { visit });
+    } catch (error) {
+        logger.error(`getVisit error: ${error.message}`);
+    return errorResponse(res, 500, 'Failed to retrieve visit', error);
+    }
+}
