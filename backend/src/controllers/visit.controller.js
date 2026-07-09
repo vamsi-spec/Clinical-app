@@ -193,3 +193,181 @@ export const getVisit = async (req,res) => {
     return errorResponse(res, 500, 'Failed to retrieve visit', error);
     }
 }
+
+
+export const getVisitStatus = async (req,res) => {
+    try {
+        const {id} = req.params;
+
+        const visit = await prisma.visit.findUnique({
+            where: {id},
+            select: {
+                id: true,
+                pipelineStatus: true,
+                pipelineError: true,
+                pipelineStartedAt: true,
+                pipelineCompletedAt: true,
+                doctorId: true
+            }
+        });
+        if(!visit) {
+            return errorResponse(res,404,'Visit not found')
+        }
+
+        if (req.user.role === 'DOCTOR' && visit.doctorId !== req.user.id) {
+      return errorResponse(res, 403, 'You do not have access to this visit');
+    }
+
+    return successResponse(res, 200, 'Visit status retrieved', {
+      visitId: visit.id,
+      status: visit.pipelineStatus,
+      error: visit.pipelineError,
+      startedAt: visit.pipelineStartedAt,
+      completedAt: visit.pipelineCompletedAt,
+    });
+  } catch (error) {
+    logger.error(`getVisitStatus error: ${error.message}`);
+    return errorResponse(res, 500, 'Failed to retrieve visit status', error);
+  }
+}
+
+
+//Update visit
+//Narrow field set - visitDate and specialty only
+//Everything else is pipeline-managed
+
+export const updateVisit = async (req,res) => {
+    try {
+        const {id} = req.params;
+        const updates = req.body;
+
+        const visit = await prisma.visit.findUnique({where: {id}});
+        if(!visit) {
+            return errorResponse(res,404,'Visit not found');
+        }
+
+        if (req.user.role === 'DOCTOR' && visit.doctorId !== req.user.id) {
+      return errorResponse(res, 403, 'You do not have access to this visit');
+    }
+
+    const data = {};
+    if (updates.visitDate) data.visitDate = new Date(updates.visitDate);
+    if (updates.specialty) data.specialty = updates.specialty;
+
+    const updatedVisit = await prisma.visit.update({
+      where: { id },
+      data,
+    })
+
+    logger.info(`Visit updated: ${id} by user ${req.user.id}`);
+    return successResponse(res, 200, 'Visit updated successfully', { visit: updatedVisit });
+  } catch (error) {
+    logger.error(`updateVisit error: ${error.message}`);
+    return errorResponse(res, 500, 'Failed to update visit', error);
+  }
+}
+
+//ARCHIVE visit
+//Admin only . soft delete - sets isArchived = true
+//visits are never hard-deleted; stored in DB with isArchived = true.
+//can be re-activated using unarchive call.
+
+export const archiveVisit = async (req,res) => {
+    try {
+        const {id} = req.params;
+
+        const visit = await prisma.visit.findUnique({where: {id}});
+        if(!visit) {
+            return errorResponse(res,404,'Visit not found');
+        }
+
+        if (visit.isArchived) {
+            return errorResponse(res,400,'Visit is already archived');
+        }
+
+        const archivedVisit = await prisma.visit.update({
+            where: {id},
+            data: {isArchived: true},
+        });
+
+
+        logger.info(`Visit archived: ${id} by admin ${req.user.id}`);
+
+    return successResponse(res, 200, 'Visit archived', { visit: archivedVisit });
+  } catch (error) {
+    logger.error(`archiveVisit error: ${error.message}`);
+    return errorResponse(res, 500, 'Failed to archive visit', error);
+  }
+}
+
+
+//Restore visit
+export const restoreVisit = async (req,res) => {
+    try {
+        const {id} = req.params;
+
+        const visit = await prisma.visit.findUnique({where: {id}});
+
+        if(!visit) {
+            return errorResponse(res,404,'Visit not found')
+        }
+
+        if(!visit.isArchived) {
+            return errorResponse(res,400,'Visit is not archived')
+        }
+
+        const restoredVisit = await prisma.visit.update({
+            where: {id},
+            data: {isArchived: false},
+        });
+
+logger.info(`Visit restored: ${id} by admin ${req.user.id}`);
+
+    return successResponse(res, 200, 'Visit restored', { visit: restoredVisit });
+  } catch (error) {
+    logger.error(`restoreVisit error: ${error.message}`);
+    return errorResponse(res, 500, 'Failed to restore visit', error);
+  }
+}
+
+//Retry Failed pipeline 
+
+export const retryPipeline = async (req,res) => {
+    try {
+    const { id } = req.params;
+
+    const visit = await prisma.visit.findUnique({ where: { id } });
+    if (!visit) {
+      return errorResponse(res, 404, 'Visit not found');
+    }
+
+    if (visit.pipelineStatus !== 'FAILED') {
+      return errorResponse(res, 400, 'Only failed visits can be retried');
+    }
+
+    if (!visit.audioUrl) {
+      return errorResponse(res, 400, 'No audio attached to this visit — re-upload required');
+    }
+
+    if (req.user.role === 'DOCTOR' && visit.doctorId !== req.user.id) {
+      return errorResponse(res, 403, 'You do not have access to this visit');
+    }
+
+    await prisma.visit.update({
+      where: { id },
+      data: {
+        pipelineStatus: 'AUDIO_UPLOADED',
+        pipelineError: null,
+        pipelineStartedAt: null,
+        pipelineCompletedAt: null,
+      },
+    });
+
+    logger.info(`Pipeline retry requested for visit: ${id}`);
+
+    return successResponse(res, 200, 'Pipeline retry initiated', { visitId: id });
+  } catch (error) {
+    logger.error(`retryPipeline error: ${error.message}`);
+    return errorResponse(res, 500, 'Failed to retry pipeline', error);
+  }
+}
