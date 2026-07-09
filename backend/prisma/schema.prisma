@@ -50,13 +50,17 @@ enum AppointmentStatus{
 }
 
 enum PipelineStatus {
-    PENDING
+    PENDING               
+    AUDIO_UPLOADED        
     TRANSCRIBING
-    CORRECTING
     DIARIZING
+    CORRECTING
     EXTRACTING_ENTITIES
     GENERATING_SOAP
-    GENERATING_BILLING
+    CHECKING_INCONSISTENCIES
+    MAPPING_EXPLAINABILITY
+    CHECKING_BILLING
+    CHECKING_DRUGS
     COMPLETED
     FAILED
 }
@@ -214,32 +218,50 @@ model TransferRequest {
 //Visit
 
 model Visit {
-  id     String @id @default(uuid())
-  patientId String
-  doctorId   String
-  audioFileUrl    String?
-  audoPublicId    String?
-  duration    Int?
-  visitDate   DateTime  @default(now())
-  pipelineStatus  PipelineStatus  @default(PENDING)
-  pipelineError   String?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  id              String         @id @default(uuid())
 
-  patient       Patient   @relation(fields: [patientId], references: [id])
-  doctor        User      @relation(fields: [doctorId], references: [id])
+  patientId       String
+  patient         Patient        @relation(fields: [patientId], references: [id])
 
-  soapNote      SOAPNote?
-  nerResult     NERResult?
-  drugInteractions    DrugInteraction[]
-  billingCode         BillingCode?
+  doctorId        String
+  doctor          User           @relation(fields: [doctorId], references: [id])
 
-  @@index([patientId])
-  @@index([doctorId])
-  @@index([visitDate])
+  appointmentId   String?        @unique
+  appointment     Appointment?   @relation(fields: [appointmentId], references: [id])
+
+  // Visit metadata  
+  visitDate       DateTime       @default(now())
+  specialty       String         // snapshotted from doctor.specialty at creation time —
+                                  // if doctor changes specialty later, past visits
+                                  // still use the specialty prompt that was active then
+
+  // Audio
+  audioUrl        String?        
+  audioPublicId   String?        
+  audioDuration   Float?         
+
+  // Pipeline tracking 
+  pipelineStatus  PipelineStatus @default(PENDING)
+  pipelineError   String?        // populated only if pipelineStatus = FAILED
+  pipelineStartedAt   DateTime?
+  pipelineCompletedAt DateTime?
+  lastKafkaEventId    String?    // last event ID processed — for tracing/debugging
+
+  // Relations to pipeline output
+  soapNote        SOAPNote?
+  nerResult       NERResult?
+  billingCode     BillingCode?
+  drugInteractions DrugInteraction[]
+
+  isArchived      Boolean        @default(false)
+
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
   @@index([patientId, doctorId, visitDate])
+  @@index([pipelineStatus])
+  @@index([doctorId, isArchived])
 }
-
 
 //soapNote
 
@@ -380,6 +402,7 @@ model Appointment {
   // Relations
   patient         Patient           @relation(fields: [patientId], references: [id])
   doctor          User              @relation(fields: [doctorId], references: [id])
+  visit           Visit?
 
   @@index([doctorId])
   @@index([patientId])
