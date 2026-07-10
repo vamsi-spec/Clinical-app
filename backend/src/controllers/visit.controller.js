@@ -1,7 +1,13 @@
 import prisma from "../config/db.js"
 import logger from "../utils/logger.js"
-
+import { uploadAudio } from "../middleware/upload.middleware.js"
+import { buildPatientContext } from "../services/patientContext.services.js"
+import { publishAudioUploaded } from "../services/pipelineEvents.services.js"
+import { cleanupTempFile } from "../middleware/upload.middleware.js"
 import { successResponse,errorResponse,paginatedResponse,validationErrorResponse } from "../utils/apiResponse.js"
+
+import fs from 'fs';
+
 
 
 
@@ -371,3 +377,111 @@ export const retryPipeline = async (req,res) => {
     return errorResponse(res, 500, 'Failed to retry pipeline', error);
   }
 }
+
+
+//UPLOAD visit audio
+//This trigger point for entire ML pipeline
+
+// --- FLOW ---
+//1.Validate visit exists,belongs to requster, is in state that accepts audio
+//2.Upload the temp file to cloudinary
+//3.Gather patient context
+//4.Update visit: audioUrl,audioPublicId,status=AUDIO_UPLOADED
+//5.Publish visit.audio.uploaded to kafka
+//6.Clean up local temp file
+//7.Respond 202 Accepted immediately - the doctor does not wait for entire pipeline-> Real time arrive via SOCKET.io
+
+export const uploadVisitAudio = async (req,res) => {
+  let tempFilePath = null;
+  try {
+    const {id} = req.params
+    const {numSpeakers} = req.body
+
+    if(!req.file) {
+      return errorResponse(res,400,'No audio file provided');
+    }
+    tempFilePath = req.file.path;
+
+    const visit = await prisma.visit.findUnique({where: {id}});
+    if(!visit) {
+      await cleanupTempFile(tempFilePath)
+      return errorResponse(res,404,'Visit not found');
+    }
+
+    if(req.user.role === 'DOCTOR' && visit.doctorId !== req.user.id) {
+      await cleanupTempFile(tempFilePath)
+      return errorResponse(res,403,'You do not have access to this visit');
+    }
+
+    const acceptableStatuses = ['PENDING','FAILED'];
+    if(!acceptableStatuses.includes(visit.pipelineStatus)) {
+      await cleanupTempFile(tempFilePath);
+      return errorResponse(res,409,'Visit is already processing or completed');
+    }
+
+    if(visit.isArchived) {
+      await cleanupTempFile(tempFilePath);
+      return errorResponse(res,400,'Cannot upload audio to an archived visit');
+    }
+
+    //STEP - 1 Upload to Cloudinary
+    const uploadResult = await uploadAudio(tempFilePath, {
+      folder: `clinical-audio/${visit.patientId}`,
+      publicIdPrefix: `visit-${visit.id}`,
+    });
+
+    logger.info(
+      `Audio uploaded to Cloudinary for visit ${id}: ` +
+      `${uploadResult.duration}s, ${(uploadResult.bytes / 1024 / 1024).toFixed(1)}MB`
+    );
+
+    const patientContext = await buildPatientContext(visit.patientId)
+
+    const updatedVisit = await prisma.visit.update({
+      where: {id},
+      data: {
+        audioUrl: uploadResult.url,
+        audioPublicId: uploadResult.publicId,
+        audioDuration: uploadResult.duration,
+        pipelineStatus: 'AUDIO_UPLOADED',
+        pipelineError: null,
+        pipelineStartedAt: new Date(),
+        pipelineCompletedAt: null,
+      }
+    });
+
+    const eventId = await publishAudioUploaded({
+      visitId: id,
+      audioUrl: uploadResult.url,
+      audioPublicId: uploadResult.publicId,
+      specialty: visit.specialty,
+      patientContext,
+      numSpeakers: numSpeakers ? parseInt(numSpeakers,10) : null,
+    });
+
+    await prisma.visit.update({
+      where: {id},
+      data: { lastKafkaEventId: eventId },
+    })
+
+    logger.info(`Visit ${id} pipeline triggered — eventId=${eventId}`);
+
+    return successResponse(res,202,'Audio uploaded - pipeline processing started',{
+      visitId: updatedVisit.id,
+      pipelineStatus: updatedVisit.pipelineStatus,
+      audioUrl: updatedVisit.audioUrl,
+      audioDuration: updatedVisit.audioDuration,
+    })
+
+  } catch (error) {
+    logger.error(`uploadVisitAudio error: ${error.message}`);
+    return errorResponse(res, 500, 'Failed to upload audio', error);
+  } finally {
+    if(tempFilePath) {
+      await cleanupTempFile(tempFilePath)
+    }
+  }
+}
+
+
+
