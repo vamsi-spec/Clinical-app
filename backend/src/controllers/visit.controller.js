@@ -359,6 +359,8 @@ export const retryPipeline = async (req,res) => {
       return errorResponse(res, 403, 'You do not have access to this visit');
     }
 
+    const patientContext = await buildPatientContext(visit.patientId);
+
     await prisma.visit.update({
       where: { id },
       data: {
@@ -367,6 +369,15 @@ export const retryPipeline = async (req,res) => {
         pipelineStartedAt: null,
         pipelineCompletedAt: null,
       },
+    });
+
+    const eventId = await publishAudioUploaded({
+      visitId: id,
+      audioUrl: visit.audioUrl,
+      audioPublicId: visit.audioPublicId,
+      patientContext,
+      specialty: visit.specialty,
+      numSpeakers: null
     });
 
     logger.info(`Pipeline retry requested for visit: ${id}`);
@@ -482,6 +493,7 @@ export const uploadVisitAudio = async (req,res) => {
     }
   }
 }
+
 
 
 

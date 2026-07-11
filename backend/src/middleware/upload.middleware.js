@@ -7,8 +7,12 @@ import fs from 'fs/promises'
 import logger from '../utils/logger.js'
 import { errorResponse } from '../utils/apiResponse.js'
 
+const TEMP_DIR = path.join(__dirname,'../../temp');
 
-const ALLOWED_AUDIO_FORMATS = [
+
+
+
+const ALLOWED_MIME_TYPES = [
   'audio/mpeg',
   'audio/wav',
   'audio/wave',
@@ -26,42 +30,45 @@ const ALLOWED_EXTENSIONS = ['.mp3', '.wav', '.m4a', '.ogg', '.webm']
 
 const MAX_FILE_SIZE = 100 * 1024 * 1024
 
+export const ensuresTempDir = async () => {
+  if(!fs.existsSync(TEMP_DIR)) {
+    fs.mkdirSync(TEMP_DIR,{recursive: true})
+  }
+}
+
+
+
 
 //Storage - disk storage in temp folder
 //files are upload to cloudinary immediatly
 //after multer saves them then delete from disk
 
 const storage = multer.diskStorage({
-    destination: (_req,_file,cb) => {
-        cb(null,'temp/')
-    },
-    filename: (_req,file,cb) => {
-        const uniqueSuffix = `${Date.now()}-${Math.round(Math.random()*1e9)}`
-
-        const ext = path.extname(file.originalname).toLowerCase()
-        cb(null,`audio-${uniqueSuffix}${ext}`)
-    }
-})
+  destination: async (req, file, cb) => {
+    await ensureTempDir();
+    cb(null, TEMP_DIR);
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname) || '.webm';
+    const uniqueName = `audio-${req.params.id}-${Date.now()}${ext}`;
+    cb(null, uniqueName);
+  },
+});
 
 
 //File filter
-const fileFilter = (_req,file,cb) => {
-    const mimeAllowed = ALLOWED_AUDIO_FORMATS.includes(file.mimetype)
-    const ext = path.extname(file.originalname).toLowerCase()
-    const extAllowed = ALLOWED_EXTENSIONS.includes(ext)
 
-    if(mimeAllowed || extAllowed){
-        cb(null,true)
+const fileFilter = (req, file, cb) => {
+  const ext = path.extname(file.originalname).toLowerCase();
+  const mimeOk = ALLOWED_MIME_TYPES.includes(file.mimetype);
+  const extOk = ALLOWED_EXTENSIONS.includes(ext);
 
-    }else{
-     cb(
-      new Error(
-        `Invalid file type. Allowed formats: ${ALLOWED_EXTENSIONS.join(', ')}`
-      ),
-      false
-    )
+  if (mimeOk || extOk) {
+    cb(null, true);
+  } else {
+    cb(new Error(`Unsupported audio format: ${file.mimetype} (${ext})`));
   }
-}
+};
 
 //multer instance
 
@@ -78,7 +85,7 @@ const upload = multer({
 //After this middleware runs, audio file is at req.file
 //req.file = {fieldname,originalname,mimetype,size,path,filename}
 
-export const uploadAudio = (req,res,next) => {
+export const uploadAudioMiddleware = (req,res,next) => {
     const multerSingle = upload.single('audio')
 
     multerSingle(req,res,(err) => {
@@ -123,14 +130,7 @@ export const cleanupTempFile = async (filePath) => {
 }
 
 
-export const ensureTempDir = async () => {
-  try {
-    await fs.mkdir('temp', { recursive: true })
-    logger.info('✅ Temp directory ready')
-  } catch (error) {
-    logger.error('Failed to create temp directory:', error)
-  }
-}
+
 
 
 

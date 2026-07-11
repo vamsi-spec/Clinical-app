@@ -3,9 +3,11 @@ import protect from '../middleware/auth.middleware.js'
 import { allowRoles,adminOnly,clinicalStaff,doctorAndAdmin } from '../middleware/role.middleware.js'
 import { validate,validateParams,validateQuery } from '../middleware/validate.middleware'
 import { auditLog } from '../middleware/audit.middleware'
+import { uploadLimiter } from '../middleware/rateLimiter.middleware.js'
+import  {uploadAudioMiddleware} from '../middleware/upload.middleware.js'
 
 import { createVisitSchema,updateVisitSchema,visitQuerySchema,visitIdParamSchema } from '../validators/visit.validators'
-import { createVisit,listVisits,getVisit,getVisitStatus,updateVisit,archiveVisit,restoreVisit,retryPipeline } from '../controllers/visit.controller'
+import { createVisit,listVisits,getVisit,getVisitStatus,updateVisit,archiveVisit,restoreVisit,retryPipeline, uploadVisitAudio } from '../controllers/visit.controller'
 
 
 const visitRouter = express.Router()
@@ -14,6 +16,9 @@ visitRouter.use(auditLog)
 
 //create
 visitRouter.post('/',doctorAndAdmin,validate(createVisitSchema),createVisit)
+
+//Upload audio - triggers ML pipeline
+visitRouter.post('/:id/audio',doctorAndAdmin,uploadLimiter,validateParams(visitIdParamSchema),uploadAudioMiddleware,uploadVisitAudio)
 
 //List
 visitRouter.get('/:id',clinicalStaff,validateParams(visitIdParamSchema),getVisit)
