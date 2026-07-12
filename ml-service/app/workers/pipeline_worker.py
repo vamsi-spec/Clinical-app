@@ -47,7 +47,7 @@ def process_visit_audio(payload: dict,model_state: dict):
         def status_cb(status,message,progress):
             scaled = 5 + int(progress * 0.35)
             publish_progress(visit_id,status,message,scaled)
-
+        #STEP 1: ASR TRANSCRIPTION 
         transcription = run_transcription_pipeline(
             audio_path=local_audio_path,
             model_state=model_state,
@@ -61,3 +61,42 @@ def process_visit_audio(payload: dict,model_state: dict):
             f"[worker] Transcription done for {visit_id}: "
             f"{len(transcription.segments)} segments"
         )
+
+        publish_progress(visit_id,"EXTRACTING_ENTITIES","EXtracting medical entities...",45)
+        #STEP 2: NER + SENTENCE SEGMENTATION + SPEAKER SEPARATION
+        ner_response = extract_clinical_entities(
+            transcript=transcription.full_text,
+            segments=transcription.segments,
+            nlp_bc5=model_state.get("nlp_bc5")
+            nlp_sci=model_state.get("nlp_sci")
+            specialty=specialty
+        )
+
+        ner_response.visit_id = visit_id
+
+        #STEP 3 SOAP + CDS + Inconsistency
+        publish_progress(visit_id,"GENERATING_SOAP","Generating clinical note...",55)
+
+        speaker_transcript = build_speaker_transcript(transcription.segments)
+
+        llm_result = run_llm_pipeline(
+            transcript=transcription.full_text,
+            speaker_formatted_transcript=speaker_transcript,
+            ner_response=ner_response,
+            patient_context=patient_context,
+            specialty=specialty,
+            run_inconsistency_check=True,
+        )
+
+        publish_progress(visit_id, "CHECKING_INCONSISTENCIES", "Checking for safety issues...", 70)
+
+        #STEP 4 Explainabilty mapping 
+        publish_progress(visit_id,"MAPPING_EXPLAINABILITY","Linking note to audio",78)
+
+        explainable_note = build_explainable_soap(
+            soap_note=llm_result["soap"],
+            segments=transcription.segments,
+            embedder=model_state.get("embedder"),
+        )
+
+
