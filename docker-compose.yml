@@ -164,22 +164,23 @@ services:
   # ============================================
   # ML SERVICE — Python FastAPI
   # ============================================
-  ml-service:
+  ml-worker:
     build:
       context: ./ml-service
       dockerfile: Dockerfile
-    container_name: clinical_ml
-    restart: unless-stopped
-    ports:
-      - '8000:8000'
-    env_file:
-      - ./ml-service/.env
+    container_name: clinical_ml_worker
+    command: python -m app.worker_main
+    depends_on:
+      ollama:
+        condition: service_started
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKERS: kafka:29092
+      OLLAMA_BASE_URL: http://ollama:11434
     volumes:
       - ./ml-service:/app
       - ml_model_cache:/root/.cache
-    depends_on:
-      ollama:
-        condition: service_healthy
     networks:
       - clinical_network
 

@@ -99,4 +99,69 @@ def process_visit_audio(payload: dict,model_state: dict):
             embedder=model_state.get("embedder"),
         )
 
+        #step 5: Billing suggestion
+        publish_progress(visit_id, "CHECKING_BILLING", "Suggesting billing codes...", 87)
+
+        billing_result = suggest_billing_codes(soap_assessment=llm_result["soap"].get("assessment",""),
+        diagnosis_entities=ner_response.diagnoses,
+        visit_duration_minutes=int((transcription.duration or 0) / 60) or 15,
+        )
+
+        #Step6: Drug interaction check:
+        publish_progress(visit_id,"CHECKING_DRUGS","Checking drug interactions...",93)
+
+        medications_texts = [m.text for m in ner_response.medications if not m.negated]
+
+        drug_result = check_drug_interactions_sync(medication_texts, visit_id=visit_id)
+        
+        #Firing a dedicated urgent alert if anything critical found 
+        if drug_result["metadata"].get("has_high") or drug_result["metadata"].get("has_critical"):
+            publish_critical_drug_interaction(visit_id, drug_result["interactions"])
+
+        elapsed = round(time.time() - start_time, 2)
+
+
+        full_result = {
+            "transcription": {
+                "full_text": transcription.full_text,
+                "segments": [s.model_dump() for s in transcription.segments],
+                "detected_language": transcription.detected_language,
+                "duration": transcription.duration,
+                "speaker_count": transcription.speaker_count,
+            },
+            "ner": {
+                "medications": [m.model_dump() for m in ner_response.medications],
+                "symptoms":    [s.model_dump() for s in ner_response.symptoms],
+                "diagnoses":   [d.model_dump() for d in ner_response.diagnoses],
+            },
+            "soap": llm_result["soap"],
+            "cds": llm_result["cds"],
+            "inconsistencies": llm_result["inconsistencies"],
+            "explainable_note": explainable_note,
+            "billing": billing_result,
+            "drug_interactions": drug_result,
+            "generation_metadata": {
+                **llm_result["generation_metadata"],
+                "total_pipeline_duration_seconds": elapsed,
+            },
+        }
+
+
+        publish_pipeline_completed(visit_id,full_result)
+
+        publish_progress(visit_id,"COMPLETED","Clinical note ready.",100)
+        logger.info(f"[worker] Pipeline complete for visit {visit_id}: {elapsed}s")
+
+    except Exception as e:
+        logger.error(f"[worker] Pipeline FAILED for visit {visit_id}: {e}", exc_info=True)
+        publish_pipeline_failed(
+            visit_id=visit_id,
+            error=str(e),
+            failed_step="unknown",  
+        )
+
+    finally:
+        if local_audio_path:
+            cleanup_local_audio(local_audio_path)
+
 

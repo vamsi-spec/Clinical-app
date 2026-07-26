@@ -466,7 +466,7 @@ async def check_drug_interactions(medication_names: list[str],visit_id: str = ""
 
                 rxnav_available = True
             
-        except Exception as e:
+    except Exception as e:
         logger.warning(
             f"RxNav unavailable: {e}. "
             "Falling back to local known-pairs check."
