@@ -266,77 +266,102 @@ model Visit {
 //soapNote
 
 model SOAPNote {
-  id        String  @id @default(uuid())
-  visitId   String  @unique
-  subjective    String    @db.Text
-  objective     String?   @db.Text
-  assessment    String?   @db.Text
-  plan          String?   @db.Text
-  explainableNote   Json  @default("{}")
-  auditHash     String?   //SHA-256 for finalized one
-  versions      Json      @default("[]")
-  isFinalized   Boolean   @default(false)
-  finalizedAt   DateTime?
-  finalizedBy   String?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  id                String   @id @default(uuid())
 
+  visitId           String   @unique
+  visit             Visit    @relation(fields: [visitId], references: [id], onDelete: Cascade)
 
-  visit Visit @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  subjective        String   @db.Text
+  objective         String?  @db.Text
+  assessment        String?  @db.Text
+  plan              String?  @db.Text
+
+  // AI Analysis
+  differentials     Json     @default("[]")
+  redFlags          Json     @default("[]")
+  missedFollowups   Json     @default("[]")
+  inconsistencies   Json     @default("{}")
+  explainableNote   Json     @default("{}")
+
+  // Audit & Versioning
+  auditHash         String?  // SHA-256 hash after finalization
+  versions          Json     @default("[]")
+
+  // Finalization
+  isFinalized       Boolean  @default(false)
+  finalizedAt       DateTime?
+  finalizedBy       String?
+
+  // Timestamps
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
   @@index([visitId])
-
 }
-
 
 model NERResult {
-  id          String  @id @default(uuid())
-  visitId     String  @unique
-  medications Json    @default("[]")
-  symptoms    Json    @default("[]")
-  diagnoses   Json    @default("[]")
-  rawSegments Json    @default("[]")
-  createdAt   DateTime @default(now())
+  id            String   @id @default(uuid())
 
-  visit Visit @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  visitId       String   @unique
+  visit         Visit    @relation(fields: [visitId], references: [id], onDelete: Cascade)
 
-  @@index([visitId])
-}
+  medications   Json     @default("[]")
+  symptoms      Json     @default("[]")
+  diagnoses     Json     @default("[]")
+  rawSegments   Json     @default("[]")
 
-
-model DrugInteraction {
-  id        String      @id @default(uuid())
-  visitId   String      
-  drug1     String
-  drug2     String
-  severity  Severity
-  description String  @db.Text
-  source    String    @default("rxnav")
-  createdAt DateTime  @default(now())
-
-  visit Visit @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   @@index([visitId])
 }
-
 
 model BillingCode {
-  id          String    @id @default(uuid())
-  visitId     String    @unique
-  icd10Codes  Json      @default("[]")
-  cptCode     Json      @default("{}")
-  codingGaps  Json      @default("[]")
-  confirmedCodes   Json      @default("[]")
-  isConfirmed   Boolean   @default(false)
-  confirmedAt DateTime?
-  confirmedBy String?
+  id                String   @id @default(uuid())
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  visitId           String   @unique
+  visit             Visit    @relation(fields: [visitId], references: [id], onDelete: Cascade)
 
-  visit Visit @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  // Suggested Codes
+  icd10Codes        Json     @default("[]")
+  cptCode           Json     @default("{}")
+  codingGaps        Json     @default("[]")
+
+  // Manual Confirmation
+  confirmedCodes    Json     @default("[]")
+  isConfirmed       Boolean  @default(false)
+  confirmedAt       DateTime?
+  confirmedBy       String?
+
+  // Timestamps
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   @@index([visitId])
 }
+
+model DrugInteraction {
+  id                String    @id @default(uuid())
+
+  visitId           String
+  visit             Visit     @relation(fields: [visitId], references: [id], onDelete: Cascade)
+
+  drug1             String
+  drug2             String
+
+  severity          Severity
+
+  description       String    @db.Text
+
+  // Source: rxnav | local_fallback
+  source            String    @default("rxnav")
+
+  createdAt         DateTime  @default(now())
+
+  @@index([visitId])
+  @@index([severity])
+}
+
 
 model AuditLog {
   id                  String     @id   @default(uuid())

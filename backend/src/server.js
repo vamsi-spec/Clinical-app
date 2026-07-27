@@ -20,6 +20,9 @@ import transferRouter from './routes/transfer.routes.js'
 import appointmentRouter from './routes/appointment.routes.js'
 import visitRouter from './routes/visit.routes.js'
 
+import startPipelineConsumer from './consumers/pipelineResultConsumer.js'
+import { disconnectKafka } from './config/kafka.js'
+
 
 dotenv.config()
 
@@ -110,6 +113,9 @@ const startServer = async () => {
         await connectRedis()
         await ensureTempDir()
 
+        await startPipelineConsumer();
+
+
         httpServer.listen(PORT, () => {
             logger.info(`Server running on port ${PORT} - ${process.env.NODE_ENV}`)
             logger.info(`Environment: ${process.env.NODE_ENV}`)
@@ -120,6 +126,8 @@ const startServer = async () => {
         process.exit(1)
     }
 }
+
+
 
 
 
@@ -134,7 +142,8 @@ process.on('uncaughtException', (error) => {
 })
 
 process.on('SIGTERM', async () => {
-    logger.info('SIGTERM received — shutting down gracefully')
+    logger.info('SIGTERM received — shutting down gracefully');
+    await disconnectKafka();
     httpServer.close(() => {
         logger.info('HTTP server closed')
         process.exit(0)
