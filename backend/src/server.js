@@ -23,6 +23,12 @@ import visitRouter from './routes/visit.routes.js'
 import startPipelineConsumer from './consumers/pipelineResultConsumer.js'
 import { disconnectKafka } from './config/kafka.js'
 
+import { setIO } from './services/socketRelay.services.js'
+import { registerVisitSocketHandlers } from './sockets/visitSocket.js'
+import { startPipelineProgressConsumer } from './consumers/pipelineProgressConsumer.js'
+import { startPipelineResultConsumer } from './consumers/pipelineResultConsumer.js'
+import { disconnectKafka } from './config/kafka.js'
+
 
 dotenv.config()
 
@@ -38,6 +44,12 @@ export const io = new Server(httpServer, {
         credentials: true,
     }
 })
+
+setIO(io);
+registerVisitSocketHandlers(io);
+
+
+
 
 app.use((req, _res, next) => {
     req.io = io
@@ -115,12 +127,20 @@ const startServer = async () => {
 
         await startPipelineConsumer();
 
+        await startPipelineProgressConsumer();
+        await startPipelineResultConsumer();
+
 
         httpServer.listen(PORT, () => {
             logger.info(`Server running on port ${PORT} - ${process.env.NODE_ENV}`)
             logger.info(`Environment: ${process.env.NODE_ENV}`)
             logger.info(`Clinical Note Intelligence Platform ready`)
         })
+
+        httpServer.listen(process.env.PORT || 5000, () => {
+      logger.info(`Server running on port ${process.env.PORT || 5000}`);
+      logger.info('Socket.IO ready for visit room subscriptions');
+    });
     } catch (error) {
         logger.error('Server failed to start:', error)
         process.exit(1)
@@ -144,6 +164,7 @@ process.on('uncaughtException', (error) => {
 process.on('SIGTERM', async () => {
     logger.info('SIGTERM received — shutting down gracefully');
     await disconnectKafka();
+    io.close();
     httpServer.close(() => {
         logger.info('HTTP server closed')
         process.exit(0)
