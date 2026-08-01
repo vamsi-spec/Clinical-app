@@ -2,6 +2,7 @@ import prisma from "../config/db.js";
 import logger from "../utils/logger.js";
 import { successResponse,errorResponse } from "../utils/apiResponse.js";
 import {requestAuditHash} from "../services/mlServiceClient.services.js";
+import { version } from "react";
 
 export const getSoapNote = async (req,res) => {
     try {
@@ -186,5 +187,85 @@ export const finalizeSoapNote = async (req,res) => {
     } catch (error) {
         logger.error(`finalizeSoapNote error: ${error.message}`);
         return errorResponse(res, 500, 'Failed to finalize SOAP note', error);
+    }
+}
+export const getSoapNoteHistory = async (req,res) => {
+    try {
+        const {visitId} = req.params;
+
+        const visit = await prisma.visit.findUnique({where: {id: visitId}})
+
+        if(!visit) return errorResponse(res,404,'Visit not found')
+
+        if(req.user.role === 'DOCTOR' && visit.doctorId !== req.user.id) {
+            return errorResponse(res,403,'You do not have access to this visit')
+        }
+
+        const soapNote = await prisma.SOAPNote.findUnique({
+            where: {visitId},
+            select: {
+                versions: true,
+                isFinalized: true,
+                finalizedAt: true,
+                finalizedBy: true,
+                auditHash: true
+            }
+        })
+
+        if(!soapNote) {
+            return errorResponse(res,404,'SOAP note not yet generated for this visit')
+        }
+
+        return successResponse(res,200,'Version history retrieved', {
+            versions: soapNote.versions || [],
+            currentlyFinalized: soapNote.isFinalized,
+            finalizedAt: soapNote.finalizedAt,
+            finalizedBy: soapNote.finalizedBy,
+            auditHash: soapNote.auditHash,
+        })
+    } catch (error) {
+        logger.error(`getSoapNoteHistory error: ${error.message}`);
+        return errorResponse(res, 500, 'Failed to retrieve SOAP note history', error);
+    }
+}
+
+//Verify audit hash
+
+export const verifySoapNoteIntegrity = async (req,res) => {
+    try {
+        const {visitId} = req.params;
+
+        const soapNote = await prisma.SOAPNote.findUnique({where: {visitId}})
+        if(!soapNote) return errorResponse(res,404,'SOAP note not found')
+
+        if(!soapNote.isFinalized) {
+            return errorResponse(res,400, 'Note is not finalized - nothing to verify')
+        }
+
+        const currentContent = {
+            subjective: soapNote.subjective,
+            objective: soapNote.objective,
+            assessment: soapNote.assessment,
+            plan: soapNote.plan,
+        }
+
+        const recomputedHash = await requestAuditHash(currentContent,visitId,soapNote.finalizedAt.toISOString());
+
+        const isValid = recomputedHash === soapNote.auditHash;
+
+        if(!isValid) {
+            logger.warn(`AUDIT HASH MISMATCH for visit ${visitId} — possible tampering detected`)
+        }
+        return successResponse(res, 200, 'Integrity check complete', {
+            visitId,
+            isValid,
+            storedHash: soapNote.auditHash,
+            recomputedHash,
+        });
+
+        
+    } catch (error) {
+        logger.error(`verifySoapNoteIntegrity error: ${error.message}`);
+        return errorResponse(res, 500, 'Failed to verify note integrity', error);
     }
 }
